@@ -1,5 +1,5 @@
 /**
- * example-plugin-adapter.js - Example adapter implemented as a plugin.
+ * example-plugin-adapter.js - MicroBlocks adapter implemented as a plugin.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -8,11 +8,16 @@
 
 'use strict';
 
-var Adapter = require('../adapter');
-var Device = require('../device');
-var Property = require('../property');
+const fs = require('fs');
+const Adapter = require('../adapter');
+const Device = require('../device');
+const Property = require('../property');
 
-class ExampleProperty extends Property {
+const ttys = [
+  '/dev/ttys002',
+];
+
+class MicroBlocksProperty extends Property {
   constructor(device, name, propertyDescription) {
     super(device, name, propertyDescription);
     this.unit = propertyDescription.unit;
@@ -40,7 +45,7 @@ class ExampleProperty extends Property {
   }
 }
 
-class ExampleDevice extends Device {
+class MicroBlocksDevice extends Device {
   constructor(adapter, id, deviceDescription) {
     super(adapter, id);
     this.name = deviceDescription.name;
@@ -48,16 +53,22 @@ class ExampleDevice extends Device {
     this.description = deviceDescription.description;
     for (var propertyName in deviceDescription.properties) {
       var propertyDescription = deviceDescription.properties[propertyName];
-      var property = new ExampleProperty(this, propertyName,
+      var property = new MicroBlocksProperty(this, propertyName,
                                          propertyDescription);
       this.properties.set(propertyName, property);
     }
   }
 }
 
-class ExamplePluginAdapter extends Adapter {
-  constructor(addonManager, packageName) {
-    super(addonManager, 'ExamplePlugin', packageName);
+class MicroBlocksAdapter extends Adapter {
+  constructor(addonManager, packageName, ttyPath) {
+    super(addonManager, 'MicroBlocks', packageName);
+    this.ttyPath = ttyPath;
+    this.readStream = fs.createReadStream(this.ttyPath);
+    this.readStream.on('data', (chunk) => {
+      console.log(`Received ${chunk.length} bytes of data:`, chunk);
+    });
+    this.writeStream = fs.createWriteStream(this.ttyPath);
     addonManager.addAdapter(this);
   }
 
@@ -73,7 +84,7 @@ class ExamplePluginAdapter extends Adapter {
   }
 
   /**
-   * Add a ExampleDevice to the ExamplePluginAdapter
+   * Add a MicroBlocksDevice to the MicroBlocksAdapter
    *
    * @param {String} deviceId ID of the device to add.
    * @return {Promise} which resolves to the device added.
@@ -83,7 +94,7 @@ class ExamplePluginAdapter extends Adapter {
       if (deviceId in this.devices) {
         reject('Device: ' + deviceId + ' already exists.');
       } else {
-        var device = new ExampleDevice(this, deviceId, deviceDescription);
+        var device = new MicroBlocksDevice(this, deviceId, deviceDescription);
         this.handleDeviceAdded(device);
         resolve(device);
       }
@@ -91,7 +102,7 @@ class ExamplePluginAdapter extends Adapter {
   }
 
   /**
-   * Remove a ExampleDevice from the ExamplePluginAdapter.
+   * Remove a MicroBlocksDevice from the MicroBlocksAdapter.
    *
    * @param {String} deviceId ID of the device to remove.
    * @return {Promise} which resolves to the device removed.
@@ -119,7 +130,7 @@ class ExamplePluginAdapter extends Adapter {
 
   // eslint-disable-next-line no-unused-vars
   startPairing(timeoutSeconds) {
-    console.log('ExamplePluginAdapter:', this.name,
+    console.log('MicroBlocksAdapter:', this.name,
                 'id', this.id, 'pairing started');
     if (this.pairDeviceId) {
       var deviceId = this.pairDeviceId;
@@ -127,55 +138,57 @@ class ExamplePluginAdapter extends Adapter {
       this.pairDeviceId = null;
       this.pairDeviceDescription = null;
       this.addDevice(deviceId, deviceDescription).then(() => {
-        console.log('ExamplePluginAdapter: device:', deviceId, 'was paired.');
+        console.log('MicroBlocksAdapter: device:', deviceId, 'was paired.');
       }).catch((err) => {
-        console.error('ExamplePluginAdapter: unpairing', deviceId, 'failed');
+        console.error('MicroBlocksAdapter: unpairing', deviceId, 'failed');
         console.error(err);
       });
     }
   }
 
   cancelPairing() {
-    console.log('ExamplePluginAdapter:', this.name, 'id', this.id,
+    console.log('MicroBlocksAdapter:', this.name, 'id', this.id,
                 'pairing cancelled');
   }
 
   removeThing(device) {
-    console.log('ExamplePluginAdapter:', this.name, 'id', this.id,
+    console.log('MicroBlocksAdapter:', this.name, 'id', this.id,
                 'removeThing(', device.id, ') started');
     if (this.unpairDeviceId) {
       var deviceId = this.unpairDeviceId;
       this.unpairDeviceId = null;
       this.removeDevice(deviceId).then(() => {
-        console.log('ExamplePluginAdapter: device:', deviceId, 'was unpaired.');
+        console.log('MicroBlocksAdapter: device:', deviceId, 'was unpaired.');
       }).catch((err) => {
-        console.error('ExamplePluginAdapter: unpairing', deviceId, 'failed');
+        console.error('MicroBlocksAdapter: unpairing', deviceId, 'failed');
         console.error(err);
       });
     }
   }
 
   cancelRemoveThing(device) {
-    console.log('ExamplePluginAdapter:', this.name, 'id', this.id,
+    console.log('MicroBlocksAdapter:', this.name, 'id', this.id,
                 'cancelRemoveThing(', device.id, ')');
   }
 }
 
-function loadExamplePluginAdapter(addonManager, manifest, _errorCallback) {
-  var adapter = new ExamplePluginAdapter(addonManager, manifest.name);
-  var device = new ExampleDevice(adapter, 'example-plug-2', {
-    name: 'example-plug-2',
-    type: 'onOffSwitch',
-    description: 'Example Plugin Device',
-    properties: {
-      on: {
-        name: 'on',
-        type: 'boolean',
-        value: false,
+function loadMicroBlocksAdapter(addonManager, manifest, _errorCallback) {
+  for (let tty of ttys) {
+    var adapter = new MicroBlocksAdapter(addonManager, manifest.name, tty);
+    var device = new MicroBlocksDevice(adapter, 'example-plug-2', {
+      name: 'example-plug-2',
+      type: 'onOffSwitch',
+      description: 'MicroBlocks Plugin Device',
+      properties: {
+        on: {
+          name: 'on',
+          type: 'boolean',
+          value: false,
+        },
       },
-    },
-  });
-  adapter.handleDeviceAdded(device);
+    });
+    adapter.handleDeviceAdded(device);
+  }
 }
 
-module.exports = loadExamplePluginAdapter;
+module.exports = loadMicroBlocksAdapter;
