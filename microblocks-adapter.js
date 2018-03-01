@@ -69,6 +69,9 @@ class MicroBlocksAdapter extends Adapter {
       console.log(`Received ${chunk.length} bytes of data:`, chunk);
     });
     this.writeStream = fs.createWriteStream(this.ttyPath);
+    this.writeStream.on('open', () => {
+      this.writeStream.write(Buffer.from([250, 26, 0]));
+    });
     addonManager.addAdapter(this);
   }
 
