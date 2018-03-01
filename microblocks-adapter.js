@@ -12,9 +12,10 @@ const fs = require('fs');
 const Adapter = require('../adapter');
 const Device = require('../device');
 const Property = require('../property');
+const SerialPort = require('serialport');
 
 const ttys = [
-  '/dev/ttys002',
+  '/dev/ttys003',
 ];
 
 class MicroBlocksProperty extends Property {
@@ -64,6 +65,20 @@ class MicroBlocksAdapter extends Adapter {
   constructor(addonManager, packageName, ttyPath) {
     super(addonManager, 'MicroBlocks', packageName);
     this.ttyPath = ttyPath;
+
+	this.port = new SerialPort('/dev/cu.usbmodem1422', { baudRate: 115200 });
+
+	// Switches the port into "flowing mode"
+	this.port.on('data', function (data) {
+	  console.log('Data:', data);
+	});
+
+	// Read data that is available but keep the stream from entering "flowing mode"
+// 	this.port.on('readable', function () {
+// 	  console.log('Data:', port.read());
+// 	});
+
+/*
     this.readStream = fs.createReadStream(this.ttyPath);
     this.readStream.on('data', (chunk) => {
       console.log(`Received ${chunk.length} bytes of data:`, chunk);
@@ -72,6 +87,14 @@ class MicroBlocksAdapter extends Adapter {
     this.writeStream.on('open', () => {
       this.writeStream.write(Buffer.from([250, 26, 0]));
     });
+
+	// xxx testing:
+    this.readStream.on('readable', () => {
+    	console.log('is readable');
+    });
+    console.log(this.readStream.read());
+*/
+
     addonManager.addAdapter(this);
   }
 
