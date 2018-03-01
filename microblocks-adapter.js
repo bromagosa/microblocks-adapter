@@ -14,10 +14,6 @@ const Device = require('../device');
 const Property = require('../property');
 const SerialPort = require('serialport');
 
-const ttys = [
-  '/dev/ttys003',
-];
-
 class MicroBlocksProperty extends Property {
   constructor(device, name, propertyDescription) {
     super(device, name, propertyDescription);
@@ -67,18 +63,65 @@ class MicroBlocksDevice extends Device {
 }
 
 class MicroBlocksAdapter extends Adapter {
-  constructor(addonManager, packageName, ttyPath) {
+  constructor(addonManager, packageName) {
     super(addonManager, 'MicroBlocks', packageName);
-    this.ttyPath = ttyPath;
 
     this.port = new SerialPort('/dev/cu.usbmodem1422', { baudRate: 115200 });
 
-    // Switches the port into "flowing mode"
-    this.port.on('data', function (data) {
-      console.log('Data:', data);
-    });
+    this.onPortData = this.onPortData.bind(this);
+    this.portData = [];
+    this.port.on('data', this.onPortData);
 
+    let deviceDescription = {
+      name: 'example-plug-2',
+      type: 'onOffSwitch',
+      description: 'MicroBlocks Plugin Device',
+      properties: {
+        on: {
+          name: 'on',
+          type: 'boolean',
+          value: false,
+        },
+        level: {
+          name: 'level',
+          type: 'number',
+          value: 0,
+        },
+      },
+    };
+
+    var device = new MicroBlocksDevice(adapter, deviceDescription.name, deviceDescription);
+
+    adapter.handleDeviceAdded(device);
     addonManager.addAdapter(this);
+  }
+
+  onPortData(data) {
+    console.log('onPortData', data);
+    this.portData = this.portData.concat(data);
+    /*
+    if (broadcast of the json blob) {
+      let blob = {
+        name: 'example-plug-2',
+        type: 'onOffSwitch',
+        description: 'MicroBlocks Plugin Device',
+        properties: {
+          on: {
+            name: 'on',
+            type: 'boolean',
+            value: false,
+          },
+          level: {
+            name: 'level',
+            type: 'number',
+            value: 0,
+          },
+        },
+      };
+      var device = new MicroBlocksDevice(adapter, blob.name, blob);
+      adapter.handleDeviceAdded(device);
+    }
+    */
   }
 
   /**
@@ -182,7 +225,15 @@ class MicroBlocksAdapter extends Adapter {
 
   sendProperty(deviceId, property) {
     console.log('sendProperty', deviceId, property);
-    this.sendLongMessage(0x08, 0, [1, property.value ? 1 : 0, 0, 0, 0]);
+
+    if (property.name == 'on') {
+      this.sendLongMessage(0x08, 0, [1, property.value ? 1 : 0, 0, 0, 0]);
+    } else if (property.name == 'switch') {
+      this.sendLongMessage(0x08, 1, [1, property.value ? 1 : 0, 0, 0, 0]);
+    } else if (property.name == 'level') {
+      let level = Math.floor(property.value);
+      this.sendLongMessage(0x08, 2, [1, level & 0xff, (level >> 16) & 0xff, ]);
+    }
   }
 
   sendLongMessage(opcode, id, data) {
@@ -195,22 +246,7 @@ class MicroBlocksAdapter extends Adapter {
 }
 
 function loadMicroBlocksAdapter(addonManager, manifest, _errorCallback) {
-  for (let tty of ttys) {
-    var adapter = new MicroBlocksAdapter(addonManager, manifest.name, tty);
-    var device = new MicroBlocksDevice(adapter, 'example-plug-2', {
-      name: 'example-plug-2',
-      type: 'onOffSwitch',
-      description: 'MicroBlocks Plugin Device',
-      properties: {
-        on: {
-          name: 'on',
-          type: 'boolean',
-          value: false,
-        },
-      },
-    });
-    adapter.handleDeviceAdded(device);
-  }
+  var adapter = new MicroBlocksAdapter(addonManager, manifest.name);
 }
 
 module.exports = loadMicroBlocksAdapter;
