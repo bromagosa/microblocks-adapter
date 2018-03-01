@@ -59,6 +59,11 @@ class MicroBlocksDevice extends Device {
       this.properties.set(propertyName, property);
     }
   }
+
+  notifyPropertyChanged(property) {
+    super.notifyPropertyChanged(property);
+    this.adapter.sendProperty(this.deviceId, property);
+  }
 }
 
 class MicroBlocksAdapter extends Adapter {
@@ -66,34 +71,12 @@ class MicroBlocksAdapter extends Adapter {
     super(addonManager, 'MicroBlocks', packageName);
     this.ttyPath = ttyPath;
 
-	this.port = new SerialPort('/dev/cu.usbmodem1422', { baudRate: 115200 });
+    this.port = new SerialPort('/dev/cu.usbmodem1422', { baudRate: 115200 });
 
-	// Switches the port into "flowing mode"
-	this.port.on('data', function (data) {
-	  console.log('Data:', data);
-	});
-
-	// Read data that is available but keep the stream from entering "flowing mode"
-// 	this.port.on('readable', function () {
-// 	  console.log('Data:', port.read());
-// 	});
-
-/*
-    this.readStream = fs.createReadStream(this.ttyPath);
-    this.readStream.on('data', (chunk) => {
-      console.log(`Received ${chunk.length} bytes of data:`, chunk);
+    // Switches the port into "flowing mode"
+    this.port.on('data', function (data) {
+      console.log('Data:', data);
     });
-    this.writeStream = fs.createWriteStream(this.ttyPath);
-    this.writeStream.on('open', () => {
-      this.writeStream.write(Buffer.from([250, 26, 0]));
-    });
-
-	// xxx testing:
-    this.readStream.on('readable', () => {
-    	console.log('is readable');
-    });
-    console.log(this.readStream.read());
-*/
 
     addonManager.addAdapter(this);
   }
@@ -195,6 +178,16 @@ class MicroBlocksAdapter extends Adapter {
   cancelRemoveThing(device) {
     console.log('MicroBlocksAdapter:', this.name, 'id', this.id,
                 'cancelRemoveThing(', device.id, ')');
+  }
+
+  sendProperty(deviceId, property) {
+    console.log('sendProperty', deviceId, property);
+    this.sendLongMessage(0x08, 0, property.value ? 1 : 0);
+  }
+
+  sendLongMessage(opcode, id, data) {
+    this.port.write(Buffer.from(
+      [0xfb, opcode, id, data & 0xff, (data >> 16) & 0xff].concat(data)));
   }
 }
 
