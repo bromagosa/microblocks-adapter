@@ -186,6 +186,7 @@ class MicroBlocksAdapter extends Adapter {
   }
 
   sendLongMessage(opcode, id, data) {
+    data.push(0xfe);
     let buf = Buffer.from(
       [0xfb, opcode, id, data.length & 0xff, (data.length >> 16) & 0xff].concat(data));
     console.log(buf);
