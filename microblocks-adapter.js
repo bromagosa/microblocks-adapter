@@ -182,12 +182,14 @@ class MicroBlocksAdapter extends Adapter {
 
   sendProperty(deviceId, property) {
     console.log('sendProperty', deviceId, property);
-    this.sendLongMessage(0x08, 0, property.value ? 1 : 0);
+    this.sendLongMessage(0x08, 0, [1, property.value ? 1 : 0, 0, 0, 0]);
   }
 
   sendLongMessage(opcode, id, data) {
-    this.port.write(Buffer.from(
-      [0xfb, opcode, id, data & 0xff, (data >> 16) & 0xff].concat(data)));
+    let buf = Buffer.from(
+      [0xfb, opcode, id, data.length & 0xff, (data.length >> 16) & 0xff].concat(data));
+    console.log(buf);
+    this.port.write(buf);
   }
 }
 
