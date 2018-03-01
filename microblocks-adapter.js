@@ -66,11 +66,19 @@ class MicroBlocksAdapter extends Adapter {
   constructor(addonManager, packageName) {
     super(addonManager, 'MicroBlocks', packageName);
 
+    this.devices = new Map();
     this.port = new SerialPort('/dev/cu.usbmodem1422', { baudRate: 115200 });
 
     this.onPortData = this.onPortData.bind(this);
     this.portData = [];
     this.port.on('data', this.onPortData);
+
+    addonManager.addAdapter(this);
+  }
+
+  onPortData(data) {
+    console.log('onPortData', data);
+    this.portData = this.portData.concat(data);
 
     let deviceDescription = {
       name: 'example-plug-2',
@@ -90,15 +98,12 @@ class MicroBlocksAdapter extends Adapter {
       },
     };
 
-    var device = new MicroBlocksDevice(this, deviceDescription.name, deviceDescription);
+    if (!this.devices.has(deviceDescription.name)) {
+      var device = new MicroBlocksDevice(this, deviceDescription.name, deviceDescription);
+      this.handleDeviceAdded(device);
+      this.devices.set(deviceDescription.name, device);
+    }
 
-    this.handleDeviceAdded(device);
-    addonManager.addAdapter(this);
-  }
-
-  onPortData(data) {
-    console.log('onPortData', data);
-    this.portData = this.portData.concat(data);
     /*
     if (broadcast of the json blob) {
       let blob = {
