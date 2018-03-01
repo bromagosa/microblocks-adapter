@@ -90,7 +90,7 @@ class MicroBlocksAdapter extends Adapter {
       },
     };
 
-    var device = new MicroBlocksDevice(adapter, deviceDescription.name, deviceDescription);
+    var device = new MicroBlocksDevice(this, deviceDescription.name, deviceDescription);
 
     adapter.handleDeviceAdded(device);
     addonManager.addAdapter(this);
@@ -118,7 +118,7 @@ class MicroBlocksAdapter extends Adapter {
           },
         },
       };
-      var device = new MicroBlocksDevice(adapter, blob.name, blob);
+      var device = new MicroBlocksDevice(this, blob.name, blob);
       adapter.handleDeviceAdded(device);
     }
     */
