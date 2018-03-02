@@ -67,7 +67,8 @@ class MicroBlocksAdapter extends Adapter {
     super(addonManager, 'MicroBlocks', packageName);
 
     this.devices = new Map();
-    this.port = new SerialPort('/dev/cu.usbmodem1422', { baudRate: 115200 });
+//    this.port = new SerialPort('/dev/cu.usbmodem1422', { baudRate: 115200 });
+    this.port = new SerialPort('/dev/ttys003', { baudRate: 115200 });
 
     this.onPortData = this.onPortData.bind(this);
     this.portData = [];
