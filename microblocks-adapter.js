@@ -1,5 +1,5 @@
 /**
- * example-plugin-adapter.js - MicroBlocks adapter implemented as a plugin.
+ * microblocks-adapter.js - MicroBlocks adapter implemented as a plugin.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -8,7 +8,6 @@
 
 'use strict';
 
-const fs = require('fs');
 const Adapter = require('../adapter');
 const Device = require('../device');
 const Property = require('../property');
@@ -49,16 +48,15 @@ class MicroBlocksDevice extends Device {
     this.type = deviceDescription.type;
     this.description = deviceDescription.description;
     for (var propertyName in deviceDescription.properties) {
-      var propertyDescription = deviceDescription.properties[propertyName];
-      var property = new MicroBlocksProperty(this, propertyName,
-                                         propertyDescription);
+      var description = deviceDescription.properties[propertyName];
+      var property = new MicroBlocksProperty(this, propertyName, description);
       this.properties.set(propertyName, property);
     }
   }
 
   notifyPropertyChanged(property) {
     super.notifyPropertyChanged(property);
-    this.adapter.sendProperty(this.deviceId, property);
+    this.adapter.sendProperty(this.id, property);
   }
 }
 
@@ -67,35 +65,81 @@ class MicroBlocksAdapter extends Adapter {
     super(addonManager, 'MicroBlocks', packageName);
 
     this.devices = new Map();
-//    this.port = new SerialPort('/dev/cu.usbmodem1422', { baudRate: 115200 });
-    this.port = new SerialPort('/dev/ttys003', { baudRate: 115200 });
+    this.port = new SerialPort('/dev/ttyACM0', { baudRate: 115200 });
 
+    this.receiveBuf = new Buffer(0);
     this.onPortData = this.onPortData.bind(this);
-    this.portData = [];
     this.port.on('data', this.onPortData);
 
     addonManager.addAdapter(this);
+
+	// xxx temporary
+    this.addLED = this.addLED.bind(this);
+	this.addLED();
   }
 
-  onPortData(data) {
-    console.log('onPortData', data);
-    this.portData = this.portData.concat(data);
-
-    let deviceDescription = {
-      name: 'example-plug-2',
-      type: 'onOffSwitch',
-      description: 'MicroBlocks Plugin Device',
+  addLED() {
+      let deviceDescription = {
+      name: 'User LED',
+      type: 'onOffLight',
       properties: {
         on: {
           name: 'on',
           type: 'boolean',
           value: false,
         },
-        level: {
-          name: 'level',
-          type: 'number',
-          value: 0,
+      },
+    };
+
+    if (!this.devices.has(deviceDescription.name)) {
+      var device = new MicroBlocksDevice(this, deviceDescription.name, deviceDescription);
+      this.handleDeviceAdded(device);
+      this.devices.set(deviceDescription.name, device);
+    }
+  }
+
+  addLED2() {
+      let deviceDescription = {
+		  name: 'Dimmable LED',
+		  type: 'dimmableLight',
+		  properties: {
+			on: {
+			  name: 'on',
+			  type: 'boolean',
+			  value: false,
+			},
+			level: {
+			  name: 'level',
+			  type: 'number',
+			  value: 0,
+			},
+		  },
+    };
+
+    if (!this.devices.has(deviceDescription.name)) {
+      var device = new MicroBlocksDevice(this, deviceDescription.name, deviceDescription);
+      this.handleDeviceAdded(device);
+      this.devices.set(deviceDescription.name, device);
+    }
+  }
+
+  onPortData(data) {
+    this.receiveBuf = Buffer.concat([this.receiveBuf, data]);
+
+    let deviceDescription = {
+      name: 'User LED',
+      type: 'dimmableLight',
+      properties: {
+        on: {
+          name: 'on',
+          type: 'boolean',
+          value: false,
         },
+		level: {
+		  name: 'level',
+		  type: 'number',
+		  value: 0,
+		},
       },
     };
 
@@ -135,7 +179,6 @@ class MicroBlocksAdapter extends Adapter {
    */
   clearState() {
     this.actions = {};
-
     for (let deviceId in this.devices) {
       this.removeDevice(deviceId);
     }
@@ -177,76 +220,22 @@ class MicroBlocksAdapter extends Adapter {
     });
   }
 
-  pairDevice(deviceId, deviceDescription) {
-    this.pairDeviceId = deviceId;
-    this.pairDeviceDescription = deviceDescription;
-  }
-
-  unpairDevice(deviceId) {
-    this.unpairDeviceId = deviceId;
-  }
-
-  // eslint-disable-next-line no-unused-vars
-  startPairing(timeoutSeconds) {
-    console.log('MicroBlocksAdapter:', this.name,
-                'id', this.id, 'pairing started');
-    if (this.pairDeviceId) {
-      var deviceId = this.pairDeviceId;
-      var deviceDescription = this.pairDeviceDescription;
-      this.pairDeviceId = null;
-      this.pairDeviceDescription = null;
-      this.addDevice(deviceId, deviceDescription).then(() => {
-        console.log('MicroBlocksAdapter: device:', deviceId, 'was paired.');
-      }).catch((err) => {
-        console.error('MicroBlocksAdapter: unpairing', deviceId, 'failed');
-        console.error(err);
-      });
-    }
-  }
-
-  cancelPairing() {
-    console.log('MicroBlocksAdapter:', this.name, 'id', this.id,
-                'pairing cancelled');
-  }
-
-  removeThing(device) {
-    console.log('MicroBlocksAdapter:', this.name, 'id', this.id,
-                'removeThing(', device.id, ') started');
-    if (this.unpairDeviceId) {
-      var deviceId = this.unpairDeviceId;
-      this.unpairDeviceId = null;
-      this.removeDevice(deviceId).then(() => {
-        console.log('MicroBlocksAdapter: device:', deviceId, 'was unpaired.');
-      }).catch((err) => {
-        console.error('MicroBlocksAdapter: unpairing', deviceId, 'failed');
-        console.error(err);
-      });
-    }
-  }
-
-  cancelRemoveThing(device) {
-    console.log('MicroBlocksAdapter:', this.name, 'id', this.id,
-                'cancelRemoveThing(', device.id, ')');
-  }
-
   sendProperty(deviceId, property) {
-    console.log('sendProperty', deviceId, property);
-
     if (property.name == 'on') {
-      this.sendLongMessage(0x08, 0, [1, property.value ? 1 : 0, 0, 0, 0]);
-    } else if (property.name == 'switch') {
-      this.sendLongMessage(0x08, 1, [1, property.value ? 1 : 0, 0, 0, 0]);
+	  let varID = 0;
+      this.sendLongMessage(0x08, varID, [3, (property.value ? 1 : 0)]);
     } else if (property.name == 'level') {
-      let level = Math.floor(property.value);
-      this.sendLongMessage(0x08, 2, [1, level & 0xff, (level >> 16) & 0xff, ]);
+	  let varID = 1;
+      let n = Math.floor(property.value);
+      this.sendLongMessage(0x08, varID,
+      	[1, (n & 0xff), ((n >> 8) & 0xff), ((n >> 16) & 0xff), ((n >> 24) & 0xff)]);
     }
   }
 
-  sendLongMessage(opcode, id, data) {
+  sendLongMessage(opcode, varID, data) {
     data.push(0xfe);
     let buf = Buffer.from(
-      [0xfb, opcode, id, data.length & 0xff, (data.length >> 16) & 0xff].concat(data));
-    console.log(buf);
+	  [0xfb, opcode, varID, data.length & 0xff, (data.length >> 16) & 0xff].concat(data));
     this.port.write(buf);
   }
 }
