@@ -45,11 +45,13 @@ class MicroBlocksProperty extends Property {
 }
 
 class MicroBlocksDevice extends Device {
-    constructor(adapter, id, deviceDescription) {
+    constructor(adapter, id, deviceDescription, serialPort, protocol) {
         super(adapter, id);
         this.name = deviceDescription.name;
-        this.type = deviceDescription.type;
+        this.type = deviceDescription.type || 'thing';
         this.description = deviceDescription.description;
+        this.serialPort = serialPort;
+        this.protocol = protocol;
         for (var propertyName in deviceDescription.properties) {
             var description = deviceDescription.properties[propertyName];
             var property = new MicroBlocksProperty(this, propertyName, description);
@@ -59,26 +61,38 @@ class MicroBlocksDevice extends Device {
 
     notifyPropertyChanged(property) {
         super.notifyPropertyChanged(property);
-        // this.adapter.sendProperty(this.id, property);
+        console.log('sendProperty', this.name, property.name);
+        var value = this.uBlocksValue(property.value, property.type),
+            packet = this.protocol.packMessage(
+                'setVar',
+                Array.from(this.properties.keys()).indexOf(property.name),
+                value);
+        console.log(packet);
+        this.serialPort.write(packet);
+    }
+
+    uBlocksValue(value, typeName) {
+        if (typeName === 'boolean') {
+            return [ 3, value && 1 || 0 ];
+        } else {
+            var level = Math.floor(value);
+            return [
+                1,
+                level & 255,
+                (level >> 8) & 255,
+                (level >> 16) & 255,
+                (level >> 24) & 255
+            ]
+        }
     }
 }
 
 class MicroBlocksAdapter extends Adapter {
     constructor(addonManager, packageName) {
         super(addonManager, 'MicroBlocks', packageName);
-
         // boards are indexed by port name
-        this.boards = new Map();
-
-        //this.receiveBuf = new Buffer(0);
-        //this.onPortData = this.onPortData.bind(this);
-        //this.port.on('data', this.onPortData);
-
+        this.devices = new Map();
         addonManager.addAdapter(this);
-
-        // xxx temporary
-        //this.addLED = this.addLED.bind(this);
-        //this.addLED();
     }
 
     startPairing(_timeoutSeconds) {
@@ -89,78 +103,55 @@ class MicroBlocksAdapter extends Adapter {
                 if (port.vendorId) {
                     // test this port to see if there's a µBlocks device in it
                     var serialPort = new SerialPort(port.comName, { baudRate: 115200 }),
-                        protocol = new Protocol(serialPort);
+                        protocol = new Protocol(serialPort),
+                        responds = false;
 
                     serialPort.receiveBroadcast = function (message) {
-                        var description = JSON.parse(message);
-                        myself.addBoard(port.comName, description.name, description.devices);
+                        var descriptor = JSON.parse(message);
+                        if (descriptor.name) {
+                            responds = true;
+                            myself.addDevice(serialPort, descriptor, protocol);
+                        }
                     };
 
                     serialPort.on('data', function (data) {
                         protocol.processRawData(Array.from(new Uint8Array(data)));
                     });
                     console.log('probing ' + port.comName);
-                    var message = protocol.packMessage('broadcast', 0, protocol.packString('moz-pair'));
-                    console.log(message);
-                    serialPort.write(message);
+                    var packet = protocol.packMessage('broadcast', 0, protocol.packString('moz-pair'));
+                    serialPort.on('open', function () {
+                        setTimeout(function () {
+                            if (!responds) {
+                                console.log('Port ' + port.comName + ' timed out');
+                                serialPort.close();
+                            }
+                        }, 2000);
+                    });
+                    serialPort.write(packet);
                 }
             });
         })
     }
 
-    /**
-     * Cancel the pairing/discovery process.
-     */
     cancelPairing() {
-        console.log('ExampleAdapter:', this.name, 'id', this.id,
-                'pairing cancelled');
+        // TODO What to do here?
     }
 
-    addBoard(portName, boardName, deviceDescriptors) {
-        var myself = this;
-        console.log('found board: ' + boardName);
-        // TODO if board already exists, update it
-        if (!this.boards.has(portName)) {
-            // TODO what to do with board name?
-            var devices = new Map();
-            this.boards.set(portName, devices);
-            deviceDescriptors.forEach(function (deviceDescriptor) {
-                // TODO if device already exists, update it
-                var device = new MicroBlocksDevice(myself, deviceDescriptor.name, deviceDescriptor);
-                myself.handleDeviceAdded(device);
-                devices.set(deviceDescriptor.name, device);
-            });
-        }
-    }
-    /*
-
-    onPortData(data) {
-        this.receiveBuf = Buffer.concat([this.receiveBuf, data]);
-
-        let deviceDescription = {
-            name: 'User LED',
-            type: 'dimmableLight',
-            properties: {
-                on: {
-                    name: 'on',
-                    type: 'boolean',
-                    value: false,
-                },
-                level: {
-                    name: 'level',
-                    type: 'number',
-                    value: 0,
-                },
-            },
-        };
-
-        if (!this.devices.has(deviceDescription.name)) {
-            var device = new MicroBlocksDevice(this, deviceDescription.name, deviceDescription);
+    // TODO if device or property already exists, update it
+    addDevice(serialPort, descriptor, protocol) {
+        console.log('found board: ' + descriptor.name);
+        if (!this.devices.has(descriptor.name)) {
+            var device = 
+                new MicroBlocksDevice(
+                    this,
+                    descriptor.name,
+                    descriptor,
+                    serialPort,
+                    protocol);
+            this.devices.set(descriptor.name, descriptor);
             this.handleDeviceAdded(device);
-            this.devices.set(deviceDescription.name, device);
         }
     }
-    */
 
     /**
      * For cleanup between tests.
@@ -170,24 +161,6 @@ class MicroBlocksAdapter extends Adapter {
         for (let deviceId in this.devices) {
             this.removeDevice(deviceId);
         }
-    }
-
-    /**
-     * Add a MicroBlocksDevice to the MicroBlocksAdapter
-     *
-     * @param {String} deviceId ID of the device to add.
-     * @return {Promise} which resolves to the device added.
-     */
-    addDevice(deviceId, deviceDescription) {
-        return new Promise((resolve, reject) => {
-            if (deviceId in this.devices) {
-                reject('Device: ' + deviceId + ' already exists.');
-            } else {
-                var device = new MicroBlocksDevice(this, deviceId, deviceDescription);
-                this.handleDeviceAdded(device);
-                resolve(device);
-            }
-        });
     }
 
     /**

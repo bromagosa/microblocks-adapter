@@ -160,7 +160,7 @@ Protocol.prototype.packString = function (string) {
 
 Protocol.prototype.packMessage = function (selector, taskId, data) {
     var descriptor = this.descriptorFor(selector),
-        message = [data ? 0xFB : 0xFA, descriptor.opCode, taskId];
+        message = [descriptor.isLong ? 0xFB : 0xFA, descriptor.opCode, taskId];
 
     if (data) {
         if (descriptor.isLong) {
