@@ -103,23 +103,35 @@ class MicroBlocksAdapter extends Adapter {
                 if (port.vendorId) {
                     // test this port to see if there's a µBlocks device in it
                     var serialPort = new SerialPort(port.comName, { baudRate: 115200 }),
-                        protocol = new Protocol(serialPort),
-                        responds = false;
+                    protocol = new Protocol(serialPort),
+                    deviceDescriptor = { properties: {} },
+                    responds = false;
 
                     serialPort.receiveBroadcast = function (message) {
-                        var descriptor = JSON.parse(message);
-                        if (descriptor.name) {
-                            responds = true;
-                            myself.addDevice(serialPort, descriptor, protocol);
+                        try {
+                            if (message.indexOf('moz-pair') === 0) {
+                                deviceDescriptor.name = message.split('moz-pair ')[1];
+                                responds = true;
+                            } else if (message.indexOf('moz-property') === 0) {
+                                var json = JSON.parse(message.split('moz-property ')[1]);
+                                console.log('got property: ', json);
+                                deviceDescriptor.properties[json.name] = json;
+                            } else if (message.indexOf('moz-done') === 0) {
+                                myself.addDevice(serialPort, deviceDescriptor, protocol);
+                            } else {
+                                console.log('Received unknown message: ' + message);
+                            }
+                        } catch (err) {
+                            console.log(err);
                         }
                     };
 
                     serialPort.on('data', function (data) {
                         protocol.processRawData(Array.from(new Uint8Array(data)));
                     });
-                    console.log('probing ' + port.comName);
-                    var packet = protocol.packMessage('broadcast', 0, protocol.packString('moz-pair'));
+
                     serialPort.on('open', function () {
+                        console.log('probing ' + port.comName);
                         setTimeout(function () {
                             if (!responds) {
                                 console.log('Port ' + port.comName + ' timed out');
@@ -127,10 +139,17 @@ class MicroBlocksAdapter extends Adapter {
                             }
                         }, 2000);
                     });
-                    serialPort.write(packet);
+
+                    serialPort.on('close', function (err) {
+                        if (err.disconnected) {
+                            console.log('Device at ' + port.comName + ' was unplugged');
+                        }
+                    });
+
+                    serialPort.write(protocol.packMessage('broadcast', 0, protocol.packString('moz-pair')));
                 }
             });
-        })
+        });
     }
 
     cancelPairing() {
