@@ -1,0 +1,18 @@
+sharedVariables 'on' 'x' 'y'
+
+spec ' ' 'announce board' 'announce board _' 'auto' '10'
+spec ' ' 'announce property' 'announce property _ type _ default value _' 'auto auto auto' 'aVariableName' 'number' 42
+spec ' ' 'finish pairing' 'finish pairing'
+
+to 'announce board' name {
+  sendBroadcast 'moz-pair ' name
+}
+
+to 'announce property' name type value {
+  sendBroadcast 'moz-property {"name":"' name '","type":"' type '","value":' value '}'
+}
+
+to 'finish pairing' {
+  sendBroadcast 'moz-done'
+}
+
