@@ -47,28 +47,49 @@ class MicroBlocksProperty extends Property {
 class MicroBlocksDevice extends Device {
     constructor(adapter, id, deviceDescription, serialPort, protocol) {
         super(adapter, id);
+        var myself = this;
         this.name = deviceDescription.name;
         this.type = deviceDescription.type || 'thing';
         this.description = deviceDescription.description;
         this.serialPort = serialPort;
         this.protocol = protocol;
+        this.variables = [];
+
+        this.serialPort.addVariable = function (name, index) {
+            // remove null chars from variable names
+            var varName = name.replace(/\u0000/g,'');
+            console.log('got variable ' + varName + ' with index ' + index);
+            myself.variables[index] = varName;
+            myself.notifyPropertyChanged(myself.properties.get(varName));
+        };
+
         for (var propertyName in deviceDescription.properties) {
-            var description = deviceDescription.properties[propertyName];
-            var property = new MicroBlocksProperty(this, propertyName, description);
-            this.properties.set(propertyName, property);
+            this.properties.set(
+                propertyName,
+                new MicroBlocksProperty(
+                    this,
+                    propertyName,
+                    deviceDescription.properties[propertyName]
+                )
+            );
         }
+
+        this.serialPort.write(protocol.packMessage('getVarNames'));
     }
 
     notifyPropertyChanged(property) {
         super.notifyPropertyChanged(property);
-        console.log('sendProperty', this.name, property.name);
-        var value = this.uBlocksValue(property.value, property.type),
-            packet = this.protocol.packMessage(
-                'setVar',
-                Array.from(this.properties.keys()).indexOf(property.name),
-                value);
-        console.log(packet);
-        this.serialPort.write(packet);
+        if (this.variables.indexOf(property.name) > -1) {
+            console.log('sendProperty', this.name, property.name);
+            var value = this.uBlocksValue(property.value, property.type),
+                packet = this.protocol.packMessage(
+                    'setVar',
+                    this.variables.indexOf(property.name),
+                    value);
+            this.serialPort.write(packet);
+        } else {
+            console.log('we don\'t yet have a variable index for property ' + this.name);
+        }
     }
 
     uBlocksValue(value, typeName) {
@@ -84,13 +105,14 @@ class MicroBlocksDevice extends Device {
                 (level >> 24) & 255
             ]
         }
+        // TODO string type not yet supported
     }
 }
 
 class MicroBlocksAdapter extends Adapter {
     constructor(addonManager, packageName) {
         super(addonManager, 'MicroBlocks', packageName);
-        // boards are indexed by port name
+        // boards are indexed by name
         this.devices = new Map();
         addonManager.addAdapter(this);
     }
@@ -103,9 +125,10 @@ class MicroBlocksAdapter extends Adapter {
                 if (port.vendorId) {
                     // test this port to see if there's a µBlocks device in it
                     var serialPort = new SerialPort(port.comName, { baudRate: 115200 }),
-                    protocol = new Protocol(serialPort),
-                    deviceDescriptor = { properties: {} },
-                    responds = false;
+                        protocol = new Protocol(serialPort),
+                        deviceDescriptor = { properties: {} },
+                        device,
+                        responds = false;
 
                     serialPort.receiveBroadcast = function (message) {
                         try {
@@ -117,9 +140,9 @@ class MicroBlocksAdapter extends Adapter {
                                 console.log('got property: ', json);
                                 deviceDescriptor.properties[json.name] = json;
                             } else if (message.indexOf('moz-done') === 0) {
-                                myself.addDevice(serialPort, deviceDescriptor, protocol);
+                                device = myself.addDevice(serialPort, deviceDescriptor, protocol);
                             } else {
-                                console.log('Received unknown message: ' + message);
+                                console.log('received unknown message: ' + message);
                             }
                         } catch (err) {
                             console.log(err);
@@ -141,8 +164,12 @@ class MicroBlocksAdapter extends Adapter {
                     });
 
                     serialPort.on('close', function (err) {
-                        if (err.disconnected) {
-                            console.log('Device at ' + port.comName + ' was unplugged');
+                        if (err && err.disconnected) {
+                            console.log('removing device at ' + port.comName + ' because it was unplugged');
+                            myself.removeThing(device).then(() => { protocol.serialPort = null });
+                        } else {
+                            console.log('device at ' + port.comName + ' successfully disconnected');
+                            protocol.serialPort = null;
                         }
                     });
 
@@ -152,11 +179,12 @@ class MicroBlocksAdapter extends Adapter {
         });
     }
 
+    /*
     cancelPairing() {
-        // TODO What to do here?
+        // what TODO here?
     }
+    */
 
-    // TODO if device or property already exists, update it
     addDevice(serialPort, descriptor, protocol) {
         console.log('found board: ' + descriptor.name);
         if (!this.devices.has(descriptor.name)) {
@@ -169,6 +197,9 @@ class MicroBlocksAdapter extends Adapter {
                     protocol);
             this.devices.set(descriptor.name, descriptor);
             this.handleDeviceAdded(device);
+            return device;
+        } else {
+            // TODO if device or property already exists, update it
         }
     }
 
@@ -178,28 +209,26 @@ class MicroBlocksAdapter extends Adapter {
     clearState() {
         this.actions = {};
         for (let deviceId in this.devices) {
-            this.removeDevice(deviceId);
+            this.removeThing(this.devices[deviceId]);
         }
     }
 
     /**
      * Remove a MicroBlocksDevice from the MicroBlocksAdapter.
      *
-     * @param {String} deviceId ID of the device to remove.
+     * @param {thing} device to remove.
      * @return {Promise} which resolves to the device removed.
      */
-    removeDevice(deviceId) {
+    removeThing(thing) {
         return new Promise((resolve, reject) => {
-            var device = this.devices[deviceId];
-            if (device) {
-                this.handleDeviceRemoved(device);
-                resolve(device);
-            } else {
-                reject('Device: ' + deviceId + ' not found.');
+            if (thing.serialPort && thing.serialPort.isOpen) {
+                thing.serialPort.close();
             }
+            this.devices.delete(thing.id);
+            this.handleDeviceRemoved(thing);
+            resolve(thing);
         });
     }
-
 }
 
 function loadMicroBlocksAdapter(addonManager, manifest, _errorCallback) {

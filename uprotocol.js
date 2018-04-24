@@ -227,6 +227,10 @@ Protocol.prototype.descriptors = [
         isLong: true
     },
     {
+        opCode: 0x09,
+        selector: 'getVarNames'
+    },
+    {
         opCode: 0x0A,
         selector: 'deleteVar'
     },
@@ -384,6 +388,9 @@ Protocol.prototype.dispatcher = {
             vmVersion = versionString.substring(1).replace(/ .*/,''),
             boardType = versionString.replace(/.* /, '');
         console.log('board is a ' + boardType + ' and runs µBlocks ' + vmVersion);
+    },
+    varName: function (data, varId) {
+        this.owner.addVariable(this.processString(data), varId);
     }
 };
 
