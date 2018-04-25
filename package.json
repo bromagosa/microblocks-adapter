@@ -32,5 +32,8 @@
     },
     "plugin": true,
     "exec": "{nodeLoader} {path}"
+  },
+  "dependencies": {
+    "serialport": "^6.2.0"
   }
 }
