@@ -32,11 +32,11 @@ class MicroBlocksProperty extends Property {
      * @note it is possible that the updated value doesn't match
      * the value passed in.
      */
-    setValue(value) {
+    setValue(value, clientOnly) {
         return new Promise((resolve, reject) => {
             super.setValue(value).then((updatedValue) => {
                 resolve(updatedValue);
-                this.device.notifyPropertyChanged(this);
+                this.device.notifyPropertyChanged(this, clientOnly);
             }).catch((err) => {
                 reject(err);
             });
@@ -77,18 +77,20 @@ class MicroBlocksDevice extends Device {
         this.serialPort.write(protocol.packMessage('getVarNames'));
     }
 
-    notifyPropertyChanged(property) {
+    notifyPropertyChanged(property, clientOnly) {
         super.notifyPropertyChanged(property);
-        if (this.variables.indexOf(property.name) > -1) {
-            console.log('sendProperty', this.name, property.name);
-            var value = this.uBlocksValue(property.value, property.type),
+        if (!clientOnly) {
+            if (this.variables.indexOf(property.name) > -1) {
+                console.log('sendProperty', this.name, property.name);
+                var value = this.uBlocksValue(property.value, property.type),
                 packet = this.protocol.packMessage(
-                    'setVar',
-                    this.variables.indexOf(property.name),
-                    value);
-            this.serialPort.write(packet);
-        } else {
-            console.log('we don\'t yet have a variable index for property ' + this.name);
+                        'setVar',
+                        this.variables.indexOf(property.name),
+                        value);
+                this.serialPort.write(packet);
+            } else {
+                console.log('we don\'t yet have a variable index for property ' + this.name);
+            }
         }
     }
 
@@ -135,7 +137,12 @@ class MicroBlocksAdapter extends Adapter {
                             if (message.indexOf('moz-pair') === 0) {
                                 deviceDescriptor.name = message.split('moz-pair ')[1];
                                 responds = true;
-                            } else if (message.indexOf('moz-property') === 0) {
+                            } else if (message.indexOf('moz-property-changed ') === 0) {
+                                var json = JSON.parse(message.split('moz-property-changed ')[1]);
+                                console.log('property changed: ', json);
+                                // second parameter asks to not notify this update back to µBlocks
+                                device.properties.get(json.name).setValue(json.value, true);
+                            } else if (message.indexOf('moz-property ') === 0) {
                                 var json = JSON.parse(message.split('moz-property ')[1]);
                                 console.log('got property: ', json);
                                 deviceDescriptor.properties[json.name] = json;
