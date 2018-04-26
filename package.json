@@ -27,10 +27,13 @@
   ],
   "moziot": {
     "api": {
-      "min": 2,
+      "min": 1,
       "max": 2
     },
     "plugin": true,
     "exec": "{nodeLoader} {path}"
+  },
+  "dependencies": {
+    "serialport": "^6.2.0"
   }
 }
