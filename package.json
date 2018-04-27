@@ -1,5 +1,6 @@
 {
   "name": "microblocks-adapter",
+  "author": "MicroBlocks",
   "version": "0.1.1",
   "description": "MicroBlocks adapter plugin for Mozilla IoT Gateway",
   "main": "index.js",
