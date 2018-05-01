@@ -10,22 +10,12 @@
 
 const SerialPort = require('serialport');
 const Protocol = require('./uprotocol.js');
+const gwa = require('gateway-addon');
 
 let Adapter, Device, Property;
-try {
-  Adapter = require('../adapter');
-  Device = require('../device');
-  Property = require('../property');
-} catch (e) {
-  if (e.code !== 'MODULE_NOT_FOUND') {
-    throw e;
-  }
-
-  const gwa = require('gateway-addon');
-  Adapter = gwa.Adapter;
-  Device = gwa.Device;
-  Property = gwa.Property;
-}
+Adapter = gwa.Adapter;
+Device = gwa.Device;
+Property = gwa.Property;
 
 // Adapter
 
@@ -73,7 +63,7 @@ class MicroBlocksDevice extends Device {
             var varName = name.replace(/\u0000/g,'');
             console.log('got variable ' + varName + ' with index ' + index);
             myself.variables[index] = varName;
-            myself.notifyPropertyChanged(myself.properties.get(varName));
+            //myself.notifyPropertyChanged(myself.properties.get(varName));
         };
 
         for (var propertyName in deviceDescription.properties) {
