@@ -142,7 +142,7 @@ Protocol.prototype.processReturnValue = function (rawData) {
         value = rawData.slice(1) == 1;
     }
 
-    return isNil(value) ? 'unknown type' : value;
+    return (value === null) ? 'unknown type' : value;
 };
 
 Protocol.prototype.processString = function (rawData) {
@@ -309,6 +309,7 @@ Protocol.prototype.descriptors = [
         selector: 'vmVersion',
         isLong: true
     },
+
     // Bidirectional
     {
         opCode: 0x1A,
