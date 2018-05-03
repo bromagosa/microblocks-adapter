@@ -63,8 +63,25 @@ class MicroBlocksDevice extends Device {
             var varName = name.replace(/\u0000/g,'');
             console.log('got variable ' + varName + ' with index ' + index);
             myself.variables[index] = varName;
-            //myself.notifyPropertyChanged(myself.properties.get(varName));
         };
+
+        // Unfinished. Turn single-property devices into specific things
+        /*
+        if (Object.keys(deviceDescription.properties).length === 1) {
+            // this is a single-property device
+            var property =
+                deviceDescription.properties[
+                    Object.keys(deviceDescription.properties)[0]
+                ];
+            if (property.type === 'boolean') {
+                this.type = 'onOffSwitch';
+                // should map property "on" to actual property
+            } else if (property.type === 'number') {
+                this.type = 'multiLevelSwitch';
+                // should map property "level" to actual property
+            }
+        }
+        */
 
         for (var propertyName in deviceDescription.properties) {
             this.properties.set(
@@ -151,6 +168,7 @@ class MicroBlocksAdapter extends Adapter {
                                 deviceDescriptor.properties[json.name] = json;
                             } else if (message.indexOf('moz-done') === 0) {
                                 device = myself.addDevice(serialPort, deviceDescriptor, protocol);
+                                serialPort.write(protocol.packMessage('broadcast', 0, protocol.packString('moz-paired')));
                             } else {
                                 console.log('received unknown message: ' + message);
                             }
@@ -196,7 +214,7 @@ class MicroBlocksAdapter extends Adapter {
     */
 
     addDevice(serialPort, descriptor, protocol) {
-        console.log('found board: ' + descriptor.name);
+        console.log('adding board: ' + descriptor.name);
         if (!this.devices.has(descriptor.name)) {
             var device = 
                 new MicroBlocksDevice(
