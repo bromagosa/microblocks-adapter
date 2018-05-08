@@ -1,58 +1,55 @@
 /*
+    uprotocol.js
 
-    protocol.js
-
-    µBlocks protocol support for Snap!
-
+    µBlocks protocol implementation
 
     written by John Maloney, Jens Mönig, and Bernat Romagosa
     http://microblocks.fun
 
-    Copyright (C) 2018 by John Maloney, Jens Mönig, Bernat Romagosa
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-    This file is part of Snap!.
-
-    Snap! is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of
-    the License, or (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
-
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
+    Copyright 2018 John Maloney, Bernat Romagosa, and Jens Mönig
 */
-
-function detect(list, predicate) {
-    // answer the first element of list for which predicate evaluates
-    // true, otherwise answer null
-    var i, size = list.length;
-    for (i = 0; i < size; i += 1) {
-        if (predicate.call(null, list[i])) {
-            return list[i];
-        }
-    }
-    return null;
-}
 
 var Protocol;
 
 // Protocol //////////////////////////////////////////////////
 
 // µBlocks message protocol
-// I interpret and dispatch messages received via the µBlocks postal service
+// I interpret messages received via the µBlocks postal service and dispatch them
+// to my client.
+//
+// The dispatcher should define a ublocksDispatcher object holding the following
+// functions:
+//
+// getSerialPortListResponse: function (portList, protocol)
+// serialConnectResponse: function (success, portPath, protocol)
+// serialDisconnectResponse: function (success, portPath, protocol)
+// boardUnplugged: function (portPath, protocol)
+// boardReconnected: function (portPath, protocol)
+// taskStarted: function (taskId, protocol)
+// taskDone: function (taskId, protocol)
+// taskReturned: function (data, taskId, protocol)
+// taskError: function (data, taskId, protocol)
+// variableValue: function (data, varIndex, protocol)
+// outputValue: function (data, taskId, protocol)
+// broadcast: function (data, taskId, protocol)
+// vmVersion: function (data, taskId, protocol)
+// varName: function (data, varId, protocol)
+//
+// These functions will be executed with the client as the caller, so you can
+// reference it by using the "this" pseudovariable. The protocol instance is also
+// passed to these functions as the last parameter.
 
-function Protocol (owner) {
-    this.init(owner);
+function Protocol (client) {
+    this.init(client);
 };
 
-Protocol.prototype.init = function (owner) {
+Protocol.prototype.init = function (client) {
     this.messageBuffer = [];
-    this.owner = owner;
+    this.client = client;
 };
 
 Protocol.prototype.processRawData = function (data) {
@@ -62,6 +59,10 @@ Protocol.prototype.processRawData = function (data) {
 
 Protocol.prototype.clearBuffer = function () {
     this.messageBuffer = [];
+};
+
+Protocol.prototype.packString = function (string) {
+    return string.split('').map(function (char) { return char.charCodeAt(0); });
 };
 
 Protocol.prototype.parseMessage = function () {
@@ -113,17 +114,17 @@ Protocol.prototype.processMessage = function (descriptor, dataSize) {
             this.processJSONMessage(JSON.parse(String.fromCharCode.apply(null, data)));
     } else {
         if (dataSize) {
-            this.dispatcher[descriptor.selector].call(this, data, taskId);
+            this.client.ublocksDispatcher[descriptor.selector].call(this.client, data, taskId, this);
         } else {
-            this.dispatcher[descriptor.selector].call(this, taskId);
+            this.client.ublocksDispatcher[descriptor.selector].call(this.client, taskId, this);
         }
     }
 };
 
 Protocol.prototype.processJSONMessage = function (json) {
-    this.dispatcher[json.selector].apply(
-        this.owner,
-        json.arguments
+    this.client.ublocksDispatcher[json.selector].apply(
+        this.client,
+        json.arguments.concat(this),
     );
 };
 
@@ -142,7 +143,7 @@ Protocol.prototype.processReturnValue = function (rawData) {
         value = rawData.slice(1) == 1;
     }
 
-    return isNil(value) ? 'unknown type' : value;
+    return (value === null) ? 'unknown type' : value;
 };
 
 Protocol.prototype.processString = function (rawData) {
@@ -152,10 +153,6 @@ Protocol.prototype.processString = function (rawData) {
 Protocol.prototype.processErrorValue = function (rawData) {
     // rawData[0] contains the error code
     return this.descriptorFor('taskError').dataDescriptor[rawData[0]] || 'Unspecified Error';
-};
-
-Protocol.prototype.packString = function (string) {
-    return string.split('').map(function (char) { return char.charCodeAt(0); });
 };
 
 Protocol.prototype.packMessage = function (selector, taskId, data) {
@@ -176,8 +173,7 @@ Protocol.prototype.packMessage = function (selector, taskId, data) {
 };
 
 Protocol.prototype.descriptorFor = function (selectorOrOpCode) {
-    return detect(
-        this.descriptors,
+    return this.descriptors.find(
         function (descriptor) {
             if (typeof selectorOrOpCode === 'string') {
                 return descriptor.selector === selectorOrOpCode;
@@ -230,6 +226,7 @@ Protocol.prototype.descriptors = [
         opCode: 0x09,
         selector: 'getVarNames'
     },
+
     {
         opCode: 0x0A,
         selector: 'deleteVar'
@@ -352,46 +349,6 @@ Protocol.prototype.descriptors = [
     }
 ];
 
-Protocol.prototype.dispatcher = {
-    // JSON messages
-    getSerialPortListResponse: function (portList) {
-    },
-    serialConnectResponse: function (success, portPath) {
-    },
-    serialDisconnectResponse: function (success, portPath) {
-    },
-    boardUnplugged: function (portPath) {
-    },
-    boardReconnected: function (portPath) {
-    },
-
-    // µBlocks messages
-    taskStarted: function (taskId) {
-    },
-    taskDone: function (taskId) {
-    },
-    taskReturned: function (data, taskId) {
-    },
-    taskError: function (data, taskId) {
-    },
-    variableValue: function (data, varIndex) {
-        console.log('var ' + this.varIndex + ' is ' + this.processReturnValue(data));
-    },
-    outputValue: function (data, taskId) {
-        console.log('task ' + taskId + ' says ' + this.processReturnValue(data));
-    },
-    broadcast: function (data, taskId) {
-        this.owner.receiveBroadcast(this.processString(data));
-    },
-    vmVersion: function (data) {
-        var versionString = this.processString(data),
-            vmVersion = versionString.substring(1).replace(/ .*/,''),
-            boardType = versionString.replace(/.* /, '');
-        console.log('board is a ' + boardType + ' and runs µBlocks ' + vmVersion);
-    },
-    varName: function (data, varId) {
-        this.owner.addVariable(this.processString(data), varId);
-    }
-};
-
-module.exports = Protocol;
+if (typeof module !== 'undefined') {
+    module.exports = Protocol;
+}

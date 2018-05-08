@@ -10,22 +10,12 @@
 
 const SerialPort = require('serialport');
 const Protocol = require('./uprotocol.js');
+const gwa = require('gateway-addon');
 
 let Adapter, Device, Property;
-try {
-  Adapter = require('../adapter');
-  Device = require('../device');
-  Property = require('../property');
-} catch (e) {
-  if (e.code !== 'MODULE_NOT_FOUND') {
-    throw e;
-  }
-
-  const gwa = require('gateway-addon');
-  Adapter = gwa.Adapter;
-  Device = gwa.Device;
-  Property = gwa.Property;
-}
+Adapter = gwa.Adapter;
+Device = gwa.Device;
+Property = gwa.Property;
 
 // Adapter
 
@@ -73,8 +63,25 @@ class MicroBlocksDevice extends Device {
             var varName = name.replace(/\u0000/g,'');
             console.log('got variable ' + varName + ' with index ' + index);
             myself.variables[index] = varName;
-            myself.notifyPropertyChanged(myself.properties.get(varName));
         };
+
+        // Unfinished. Turn single-property devices into specific things
+        /*
+        if (Object.keys(deviceDescription.properties).length === 1) {
+            // this is a single-property device
+            var property =
+                deviceDescription.properties[
+                    Object.keys(deviceDescription.properties)[0]
+                ];
+            if (property.type === 'boolean') {
+                this.type = 'onOffSwitch';
+                // should map property "on" to actual property
+            } else if (property.type === 'number') {
+                this.type = 'multiLevelSwitch';
+                // should map property "level" to actual property
+            }
+        }
+        */
 
         for (var propertyName in deviceDescription.properties) {
             this.properties.set(
@@ -145,27 +152,46 @@ class MicroBlocksAdapter extends Adapter {
                         device,
                         responds = false;
 
-                    serialPort.receiveBroadcast = function (message) {
-                        try {
-                            if (message.indexOf('moz-pair') === 0) {
-                                deviceDescriptor.name = message.split('moz-pair ')[1];
-                                responds = true;
-                            } else if (message.indexOf('moz-property-changed ') === 0) {
-                                var json = JSON.parse(message.split('moz-property-changed ')[1]);
-                                console.log('property changed: ', json);
-                                // second parameter asks to not notify this update back to µBlocks
-                                device.properties.get(json.name).setValue(json.value, true);
-                            } else if (message.indexOf('moz-property ') === 0) {
-                                var json = JSON.parse(message.split('moz-property ')[1]);
-                                console.log('got property: ', json);
-                                deviceDescriptor.properties[json.name] = json;
-                            } else if (message.indexOf('moz-done') === 0) {
-                                device = myself.addDevice(serialPort, deviceDescriptor, protocol);
-                            } else {
-                                console.log('received unknown message: ' + message);
+                    serialPort.ublocksDispatcher = {
+                        getSerialPortListResponse: function (portList, protocol) {},
+                        serialConnectResponse: function (success, portPath, protocol) {},
+                        serialDisconnectResponse: function (success, portPath, protocol) {},
+                        boardUnplugged: function (portPath, protocol) {},
+                        boardReconnected: function (portPath, protocol) {},
+                        taskStarted: function (taskId, protocol) {},
+                        taskDone: function (taskId, protocol) {},
+                        taskReturned: function (data, taskId, protocol) {},
+                        taskError: function (data, taskId, protocol) {},
+                        variableValue: function (data, varIndex, protocol) {},
+                        outputValue: function (data, taskId, protocol) {},
+                        vmVersion: function (data, taskId, protocol) {},
+                        varName: function (data, varId, protocol) {
+                            this.addVariable(protocol.processString(data), varId);
+                        },
+                        broadcast: function (data, taskId, protocol) {
+                            var message = protocol.processString(data);
+                            try {
+                                if (message.indexOf('moz-pair') === 0) {
+                                    deviceDescriptor.name = message.split('moz-pair ')[1];
+                                    responds = true;
+                                } else if (message.indexOf('moz-property-changed ') === 0) {
+                                    var json = JSON.parse(message.split('moz-property-changed ')[1]);
+                                    console.log('property changed: ', json);
+                                    // second parameter asks to not notify this update back to µBlocks
+                                    device.properties.get(json.name).setValue(json.value, true);
+                                } else if (message.indexOf('moz-property ') === 0) {
+                                    var json = JSON.parse(message.split('moz-property ')[1]);
+                                    console.log('got property: ', json);
+                                    deviceDescriptor.properties[json.name] = json;
+                                } else if (message.indexOf('moz-done') === 0) {
+                                    device = myself.addDevice(serialPort, deviceDescriptor, protocol);
+                                    serialPort.write(protocol.packMessage('broadcast', 0, protocol.packString('moz-paired')));
+                                } else {
+                                    console.log('received unknown message: ' + message);
+                                }
+                            } catch (err) {
+                                console.log(err);
                             }
-                        } catch (err) {
-                            console.log(err);
                         }
                     };
 
@@ -206,7 +232,7 @@ class MicroBlocksAdapter extends Adapter {
     */
 
     addDevice(serialPort, descriptor, protocol) {
-        console.log('found board: ' + descriptor.name);
+        console.log('adding board: ' + descriptor.name);
         if (!this.devices.has(descriptor.name)) {
             var device = 
                 new MicroBlocksDevice(
