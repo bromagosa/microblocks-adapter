@@ -24,6 +24,7 @@ class MicroBlocksProperty extends Property {
         super(device, name, propertyDescription);
         this.unit = propertyDescription.unit;
         this.description = propertyDescription.description;
+        this.ublocksVarName = propertyDescription.ublocksVarName;
         this.setCachedValue(propertyDescription.value);
         this.device.notifyPropertyChanged(this);
     }
@@ -65,23 +66,47 @@ class MicroBlocksDevice extends Device {
             myself.variables[index] = varName;
         };
 
-        // Unfinished. Turn single-property devices into specific things
-        /*
         if (Object.keys(deviceDescription.properties).length === 1) {
             // this is a single-property device
             var property =
                 deviceDescription.properties[
                     Object.keys(deviceDescription.properties)[0]
                 ];
+
             if (property.type === 'boolean') {
                 this.type = 'onOffSwitch';
-                // should map property "on" to actual property
-            } else if (property.type === 'number') {
-                this.type = 'multiLevelSwitch';
-                // should map property "level" to actual property
+                deviceDescription.properties.on = {};
+                Object.keys(property).forEach(function (key) {
+                    deviceDescription.properties.on[key] = property[key];
+                });
+                deviceDescription.properties.on.ublocksVarName = property.name;
+                deviceDescription.properties.on.name = 'on';
+                delete(deviceDescription.properties[property.name]);
             }
+
+            // Commenting this part out, as multilevel switches have values from 0 to 100,
+            // and our numeric things may have values between arbitrary intervals
+
+            /*
+            else if (property.type === 'number') {
+                this.type = 'multiLevelSwitch';
+                deviceDescription.properties.level = {};
+                Object.keys(property).forEach(function (key) {
+                    deviceDescription.properties.level[key] = property[key];
+                });
+                deviceDescription.properties.level.ublocksVarName = property.name;
+                deviceDescription.properties.level.name = 'level';
+
+                delete(deviceDescription.properties[property.name]);
+
+                deviceDescription.properties.on = {
+                    name: 'on',
+                    type: 'boolean',
+                    value: true
+                };
+            }
+            */
         }
-        */
 
         for (var propertyName in deviceDescription.properties) {
             this.properties.set(
@@ -98,18 +123,19 @@ class MicroBlocksDevice extends Device {
     }
 
     notifyPropertyChanged(property, clientOnly) {
+        var propertyName = property.ublocksVarName || property.name;
         super.notifyPropertyChanged(property);
         if (!clientOnly) {
-            if (this.variables.indexOf(property.name) > -1) {
-                console.log('sendProperty', this.name, property.name);
+            if (this.variables.indexOf(propertyName) > -1) {
+                console.log('sendProperty', propertyName);
                 var value = this.uBlocksValue(property.value, property.type),
                 packet = this.protocol.packMessage(
                         'setVar',
-                        this.variables.indexOf(property.name),
+                        this.variables.indexOf(propertyName),
                         value);
                 this.serialPort.write(packet);
             } else {
-                console.log('we don\'t yet have a variable index for property ' + this.name);
+                console.log('we don\'t yet have a variable index for property ' + propertyName);
             }
         }
     }
@@ -175,10 +201,19 @@ class MicroBlocksAdapter extends Adapter {
                                     deviceDescriptor.name = message.split('moz-pair ')[1];
                                     responds = true;
                                 } else if (message.indexOf('moz-property-changed ') === 0) {
-                                    var json = JSON.parse(message.split('moz-property-changed ')[1]);
+                                    var json = JSON.parse(message.split('moz-property-changed ')[1]),
+                                        property = device.properties.get(json.name);
+                                    if (!property) {
+                                        device.properties.forEach(function (eachProperty) {
+                                            if (eachProperty.ublocksVarName === json.name) {
+                                                property = eachProperty;
+                                                return;
+                                            }
+                                        });
+                                    }
                                     console.log('property changed: ', json);
                                     // second parameter asks to not notify this update back to µBlocks
-                                    device.properties.get(json.name).setValue(json.value, true);
+                                    if (property) { property.setValue(json.value, true); }
                                 } else if (message.indexOf('moz-property ') === 0) {
                                     var json = JSON.parse(message.split('moz-property ')[1]);
                                     console.log('got property: ', json);
