@@ -73,14 +73,10 @@ class MicroBlocksDevice extends Device {
                     Object.keys(deviceDescription.properties)[0]
                 ];
 
-            if (property.type === 'boolean') {
+            if (property.type === 'boolean' && property.name !== 'on') {
                 this.type = 'onOffSwitch';
-                deviceDescription.properties.on = {};
-                Object.keys(property).forEach(function (key) {
-                    deviceDescription.properties.on[key] = property[key];
-                });
+                deviceDescription.properties.on = property;
                 deviceDescription.properties.on.ublocksVarName = property.name;
-                deviceDescription.properties.on.name = 'on';
                 delete(deviceDescription.properties[property.name]);
             }
 
