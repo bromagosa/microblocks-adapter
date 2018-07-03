@@ -73,11 +73,13 @@ class MicroBlocksDevice extends Device {
           Object.keys(deviceDescription.properties)[0]
         ];
 
-      if (property.type === 'boolean' && property.name !== 'on') {
+      if (property.type === 'boolean') {
         this.type = 'onOffSwitch';
-        deviceDescription.properties.on = property;
-        deviceDescription.properties.on.ublocksVarName = property.name;
-        delete deviceDescription.properties[property.name];
+        if (property.name !== 'on') {
+          deviceDescription.properties.on = property;
+          deviceDescription.properties.on.ublocksVarName = property.name;
+          delete deviceDescription.properties[property.name];
+        }
       }
 
       // Commenting this part out, as multilevel switches have values from
