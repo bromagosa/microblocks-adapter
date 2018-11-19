@@ -163,6 +163,8 @@ class MicroBlocksAdapter extends Adapter {
     // boards are indexed by name
     this.devices = new Map();
     addonManager.addAdapter(this);
+
+    this.startPairing();
   }
 
   startPairing(_timeoutSeconds) {
