@@ -52,7 +52,10 @@ class MicroBlocksDevice extends Device {
     super(adapter, id);
     const myself = this;
     this.name = deviceDescription.name;
-    this.type = deviceDescription.type || 'thing';
+    this.type = deviceDescription.type;
+    this['@context'] = deviceDescription['@context'];
+    this['@type'] = deviceDescription['@type'];
+
     this.description = deviceDescription.description;
     this.serialPort = serialPort;
     this.protocol = protocol;
@@ -75,36 +78,15 @@ class MicroBlocksDevice extends Device {
 
       if (property.type === 'boolean') {
         this.type = 'onOffSwitch';
+        this['@type'] = ['OnOffSwitch'];
+        this['@context'] = 'https://iot.mozilla.org/schemas';
+
         if (property.name !== 'on') {
           deviceDescription.properties.on = property;
           deviceDescription.properties.on.ublocksVarName = property.name;
           delete deviceDescription.properties[property.name];
         }
       }
-
-      // Commenting this part out, as multilevel switches have values from
-      // 0 to 100, and our numeric things may have values between
-      // arbitrary intervals
-
-      /*
-      else if (property.type === 'number') {
-        this.type = 'multiLevelSwitch';
-        deviceDescription.properties.level = {};
-        Object.keys(property).forEach(function (key) {
-          deviceDescription.properties.level[key] = property[key];
-        });
-        deviceDescription.properties.level.ublocksVarName = property.name;
-        deviceDescription.properties.level.name = 'level';
-
-        delete(deviceDescription.properties[property.name]);
-
-        deviceDescription.properties.on = {
-          name: 'on',
-          type: 'boolean',
-          value: true
-        };
-      }
-      */
     }
 
     for (const propertyName in deviceDescription.properties) {
