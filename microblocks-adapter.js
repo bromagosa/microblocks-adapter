@@ -68,24 +68,35 @@ class MicroBlocksDevice extends Device {
     }
 
     notifyPropertyChanged(property, clientOnly) {
-        /*
         const propertyName = property.ublocksVarName || property.name;
+        let variable = this.variables.find(function (variable) {
+            return variable.name === propertyName;
+        });
         super.notifyPropertyChanged(property);
         if (!clientOnly) {
-            if (this.variables.indexOf(propertyName) > -1) {
-                console.log('sendProperty', propertyName);
-                const value = this.uBlocksValue(property.value, property.type),
-                    packet = this.protocol.packMessage(
-                        'setVar',
-                        this.variables.indexOf(propertyName),
-                        value);
-                this.serialPort.write(packet);
-            } else {
-                console.log('we don\'t yet have a variable index for property',
-                    propertyName);
-            }
+            console.log('sendProperty', propertyName);
+            const value = this.uBlocksValue(property.value, property.type);
+            this.serialPort.write(
+                this.packVariableMessage(variable.id, value)
+            );
         }
-        */
+    }
+
+    packVariableMessage(varId, value) {
+        let message = [0xFB, 0x08, varId];
+        let data = this.packString(value.toString()).concat(0xFE);
+        // add the data size in little endian
+        message.push(data.length & 255);
+        message.push((data.length >> 8) & 255);
+        // add the data to the message
+        message = message.concat(data);
+        return message;
+    }
+
+    packString(string) {
+        return string.split('').map(
+            function (char) { return char.charCodeAt(0); }
+        );
     }
 
     uBlocksValue(value, typeName) {
@@ -223,7 +234,7 @@ class MicroBlocksAdapter extends Adapter {
         return String.fromCharCode.apply(
             null,
             this.buffer.slice(5, 5 + dataSize)
-        );
+        ).replace(/\u0002/g, ''); // remove null chars
     }
 
     discoveredDevice(serialPort) {
@@ -261,8 +272,8 @@ class MicroBlocksAdapter extends Adapter {
 
     processVariableName(serialPort, objectId, varName) {
         serialPort.variables[objectId] = {
-            // remove null chars from variable names
-            name: varName.replace(/\u0000/g, ''),
+            name: varName,
+            id: objectId,
             value: 0
         };
         if (varName === '_wot_thingName' ||
@@ -326,6 +337,11 @@ class MicroBlocksAdapter extends Adapter {
                 serialPort.thingName
             );
         }
+    }
+
+    cancelPairing() {
+        // need to get to the serialport
+        console.log(this);
     }
 
     /**
