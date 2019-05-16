@@ -23,7 +23,6 @@
   "files": [
     "LICENSE",
     "SHA256SUMS",
-    "uprotocol.js",
     "microblocks-adapter.js",
     "index.js",
     "node_modules"
