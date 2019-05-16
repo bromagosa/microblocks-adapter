@@ -18,12 +18,11 @@ const {
 // Adapter
 
 class MicroBlocksProperty extends Property {
-    constructor(device, name, propertyDescription) {
-        super(device, name, propertyDescription);
-        this.unit = propertyDescription.unit;
-        this.description = propertyDescription.description;
-        this.ublocksVarName = propertyDescription.ublocksVarName;
-        this.setCachedValue(propertyDescription.value);
+    constructor(device, description) {
+        super(device, description.title, description);
+        this.unit = description.unit;
+        this.ublocksVarName = description.ublocksVarName;
+        this.setCachedValue(description.value);
         this.device.notifyPropertyChanged(this);
     }
 
@@ -48,25 +47,61 @@ class MicroBlocksProperty extends Property {
 
 class MicroBlocksDevice extends Device {
     constructor(adapter, serialPort) {
+        super(adapter, serialPort.thingName);
         const myself = this;
+        this.name = serialPort.thingName;
+        this.type = serialPort.thingCapability || 'thing';
+        console.log('thing type is', this.type);
         this.serialPort = serialPort;
-        this.variables = [];
+        this.variables = serialPort.variables;
+
+        serialPort.thingProperties.forEach(function (description) {
+            description.value =
+                myself.variables.find(function(variable) {
+                    return variable.name = description.ublocksVarName
+                }).value;
+            myself.properties.set(
+                description.ublocksVarName,
+                new MicroBlocksProperty(myself, description)
+            );
+        });
     }
 
-    addVariable(name, index) {
-        // remove null chars from variable names
-        // eslint-disable-next-line no-control-regex
-        console.log(`got variable ${varName} with index ${index}`);
-        this.variables[index] = { name: varName, value: 0 };
-        if (varName === '_wot_thingName' ||
-            varName === '_wot_thingCapability') {
-            // let's ask for the var content
-            this.serialPort.write([
-                0xFA, // short message
-                0x07, // getVar opCode
-                index // var ID
-            ]);
+    notifyPropertyChanged(property, clientOnly) {
+        /*
+        const propertyName = property.ublocksVarName || property.name;
+        super.notifyPropertyChanged(property);
+        if (!clientOnly) {
+            if (this.variables.indexOf(propertyName) > -1) {
+                console.log('sendProperty', propertyName);
+                const value = this.uBlocksValue(property.value, property.type),
+                    packet = this.protocol.packMessage(
+                        'setVar',
+                        this.variables.indexOf(propertyName),
+                        value);
+                this.serialPort.write(packet);
+            } else {
+                console.log('we don\'t yet have a variable index for property',
+                    propertyName);
+            }
         }
+        */
+    }
+
+    uBlocksValue(value, typeName) {
+        if (typeName === 'boolean') {
+            return [ 3, value && 1 || 0 ];
+        } else {
+            const level = Math.floor(value);
+            return [
+                1,
+                level & 255,
+                (level >> 8) & 255,
+                (level >> 16) & 255,
+                (level >> 24) & 255,
+            ];
+        }
+        // TODO string type not yet supported
     }
 }
 
@@ -90,7 +125,7 @@ class MicroBlocksAdapter extends Adapter {
                 if (port.vendorId) {
                     // test this port to see if there's a µBlocks device in it
                     const serialPort =
-                        new SerialPort(port.comName, {baudRate: 115200});
+                        new SerialPort(port.comName, { baudRate: 115200 });
                     serialPort.variables = [];
 
                     serialPort.on('data', function (data) {
@@ -110,6 +145,7 @@ class MicroBlocksAdapter extends Adapter {
                             console.log(`Port ${port.comName} timed out`);
                             serialPort.close();
                             clearTimeout(this);
+                            serialPort.discoveryTimeout = null;
                         }, 2000);
                     });
 
@@ -138,53 +174,86 @@ class MicroBlocksAdapter extends Adapter {
         let objectId = this.buffer[2];
         let dataSize = this.buffer[3] | this.buffer[4] << 8;
 
-        if (check !== 0xFA && check !== 0xFB) {
+        if (check === 0xFB) {
+            // long message
+            if (this.buffer.length >= dataSize + 5) {
+                // message is complete
+                if (opCode === 0x1D) {
+                    // variableName opCode
+                    this.discoveredDevice(serialPort);
+                    this.setDescriptionTimeout(serialPort);
+                    // variableName message is complete
+                    this.processVariableName(
+                        serialPort,
+                        objectId,
+                        this.getPayload(dataSize)
+                    );
+                } else if (opCode === 0x15) {
+                    // variableValue opCode
+                    this.processVariableValue(
+                        serialPort,
+                        objectId,
+                        this.getPayload(dataSize)
+                    );
+                } else if (opCode === 0x1B) {
+                    // broadcast opCode
+                    this.processBroadcast(
+                        serialPort,
+                        objectId,
+                        this.getPayload(dataSize)
+                    );
+                }
+                this.buffer = this.buffer.slice(5 + dataSize);
+                // there may be the start of a new message left to process
+                this.processBuffer();
+            }
+        } else if (check === 0xFA) {
+            // short message
+            this.buffer = this.buffer.slice(3);
+            // there may be the start of a new message left to process
+            this.processBuffer();
+        } else {
             // missed a message header, or we're not talking to a µBlocks board
             this.buffer = [];
             return;
         }
+    }
 
-        if (opCode === 0x1D) {
-            // variableName opCode
-            this.discoveredDevice(serialPort);
-            this.setDescriptionTimeout(serialPort);
-            if (this.buffer.length >= dataSize + 5) {
-                // variableName message is complete
-                this.processVariableName(
-                    serialPort,
-                    objectId,
-                    this.getPayload(dataSize)
-                );
-                this.buffer = this.buffer.slice(5 + dataSize);
-            }
-        } else if (opCode === 0x15) {
-            // variableValue opCode
-            if (this.buffer.length >= dataSize + 5) {
-                this.processVariableValue(
-                    serialPort,
-                    objectId,
-                    this.getPayload(dataSize)
-                );
-                this.buffer = this.buffer.slice(5 + dataSize);
-            }
-        }
+    getPayload(dataSize) {
+        return String.fromCharCode.apply(
+            null,
+            this.buffer.slice(5, 5 + dataSize)
+        );
     }
 
     discoveredDevice(serialPort) {
         if (serialPort.discoveryTimeout) {
+            serialPort.thingProperties = [];
+            console.log('found MicroBlocks device at', serialPort.path);
             clearTimeout(serialPort.discoveryTimeout);
+            serialPort.discoveryTimeout = null;
         }
     }
 
     setDescriptionTimeout(serialPort) {
+        const myself = this;
         if (!serialPort.descriptionTimeout) {
             serialPort.descriptionTimeout = setTimeout(function() {
-                console.log(
-                    'Incomplete description for thing at',
-                    serialPort.path
-                );
-                serialPort.close();
+                if (serialPort.thingProperties.length > 0) {
+                    console.log(
+                        'Thing description at ',
+                        serialPort.path,
+                        'complete');
+                    myself.addDevice(serialPort);
+                } else {
+                    console.log(
+                        'Incomplete description for thing at',
+                        serialPort.path
+                    );
+                    serialPort.close();
+                }
                 clearTimeout(this);
+                serialPort.descriptionTimeout = null;
             },
             2000);
         }
@@ -209,40 +278,53 @@ class MicroBlocksAdapter extends Adapter {
 
     processVariableValue(serialPort, objectId, varValue) {
         let variable = serialPort.variables[objectId];
-        //checkForThingCompletion();
         variable.value = varValue;
         if (variable.name === '_wot_thingName') {
             serialPort.thingName = varValue;
-            console.log('got thing named', serialPort.thingName);
         } else if (variable.name === '_wot_thingCapability') {
             serialPort.thingCapability = varValue;
-            console.log(
-                'got thing with capability',
-                serialPort.thingCapability
-            );
+        }
+        if (!serialPort.thingDefined &&
+                serialPort.thingName &&
+                serialPort.thingCapability) {
+            serialPort.thingDefined = true;
+            // Thing is defined. Let's ask the board to restart all tasks so we
+            // can receive its property definitions via broadcasts
+            serialPort.write([
+                0xFA,           // short message
+                0x06,           // stopAll opCode
+                0x00,           // object ID (irrelevant)
+                0xFA,           // short message
+                0x05,           // startAll opCode
+                0x00            // object ID (irrelevant)
+            ]);
         }
     }
 
-    checkForThingCompletion(serialPort) {
-        return serialPort.variables.find()
+    processBroadcast(serialPort, objectId, message) {
+        let property;
+        if (message.indexOf('moz-property') === 0) {
+            property = JSON.parse(message.substring(12));
+            // get the variable name from the href: "/properties/varName" field
+            property.ublocksVarName = property.href.substring(12);
+            serialPort.thingProperties.push(property);
+            console.log('got property', property.title);
+        }
     }
 
-    getPayload(dataSize) {
-        return String.fromCharCode.apply(
-            null,
-            this.buffer.slice(5, 5 + dataSize)
-        );
-    }
-
-    addDevice(device) {
-        if (!this.devices.has(device.name)) {
-            console.log(`adding new board at ${serialPort.path}`);
+    addDevice(serialPort) {
+        if (!this.devices.has(serialPort.thingName)) {
+            console.log('adding new thing named', serialPort.thingName);
+            const device = new MicroBlocksDevice(this, serialPort);
             this.devices.set(device.name, device);
             this.handleDeviceAdded(device);
             return device;
         } else {
-            // TODO: update it
-            console.log(`TODO: should be updating board named ${device.name}`);
+            // TODO
+            console.log(
+                'TODO: should be updating board named',
+                serialPort.thingName
+            );
         }
     }
 
