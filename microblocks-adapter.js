@@ -9,7 +9,6 @@
 'use strict';
 
 const SerialPort = require('serialport');
-const Protocol = require('./uprotocol.js');
 const {
   Adapter,
   Device,
@@ -66,6 +65,7 @@ class MicroBlocksDevice extends Device {
       myself.variables[index] = varName;
     };
 
+    /*
     if (Object.keys(deviceDescription.properties).length === 1) {
       // this is a single-property device
       const property =
@@ -86,7 +86,6 @@ class MicroBlocksDevice extends Device {
       // 0 to 100, and our numeric things may have values between
       // arbitrary intervals
 
-      /*
       else if (property.type === 'number') {
         this.type = 'multiLevelSwitch';
         deviceDescription.properties.level = {};
@@ -104,8 +103,8 @@ class MicroBlocksDevice extends Device {
           value: true
         };
       }
-      */
     }
+    */
 
     for (const propertyName in deviceDescription.properties) {
       this.properties.set(
@@ -175,81 +174,28 @@ class MicroBlocksAdapter extends Adapter {
           const serialPort = new SerialPort(port.comName, {baudRate: 115200});
           const protocol = new Protocol(serialPort);
           const deviceDescriptor = {properties: {}};
+          let timeout;
           let device;
           let responds = false;
-
-          serialPort.ublocksDispatcher = {
-            getSerialPortListResponse: function(_portList, _protocol) {},
-            serialConnectResponse: function(_success, _portPath, _protocol) {},
-            serialDisconnectResponse:
-              function(_success, _portPath, _protocol) {},
-            boardUnplugged: function(_portPath, _protocol) {},
-            boardReconnected: function(_portPath, _protocol) {},
-            taskStarted: function(_taskId, _protocol) {},
-            taskDone: function(_taskId, _protocol) {},
-            taskReturned: function(_data, _taskId, _protocol) {},
-            taskError: function(_data, _taskId, _protocol) {},
-            variableValue: function(_data, _varIndex, _protocol) {},
-            outputValue: function(_data, _taskId, _protocol) {},
-            vmVersion: function(_data, _taskId, _protocol) {},
-            varName: function(data, varId, protocol) {
-              this.addVariable(protocol.processString(data), varId);
-            },
-            broadcast: function(data, taskId, protocol) {
-              const message = protocol.processString(data);
-              try {
-                if (message.indexOf('moz-pair') === 0) {
-                  deviceDescriptor.name = message.split('moz-pair ')[1];
-                  responds = true;
-                } else if (message.indexOf('moz-property-changed ') === 0) {
-                  const json =
-                    JSON.parse(message.split('moz-property-changed ')[1]);
-                  let property = device.properties.get(json.name);
-                  if (!property) {
-                    device.properties.forEach(function(eachProperty) {
-                      if (eachProperty.ublocksVarName === json.name) {
-                        property = eachProperty;
-                      }
-                    });
-                  }
-                  console.log('property changed: ', json);
-                  // second parameter asks to not notify this
-                  // update back to µBlocks
-                  if (property) {
-                    property.setValue(json.value, true);
-                  }
-                } else if (message.indexOf('moz-property ') === 0) {
-                  const json = JSON.parse(message.split('moz-property ')[1]);
-                  console.log('got property: ', json);
-                  deviceDescriptor.properties[json.name] = json;
-                } else if (message.indexOf('moz-done') === 0) {
-                  device = myself.addDevice(serialPort,
-                                            deviceDescriptor,
-                                            protocol);
-                  serialPort.write(protocol.packMessage(
-                    'broadcast',
-                    0,
-                    protocol.packString('moz-paired')));
-                } else {
-                  console.log('received unknown message:',
-                              message);
-                }
-              } catch (err) {
-                console.log(err);
-              }
-            },
-          };
+          let rawJSON = '';
 
           serialPort.on('data', function(data) {
-            protocol.processRawData(Array.from(new Uint8Array(data)));
+            let index = data.indexOf('moz-json');
+            if (index > -1) {
+                responds = true;
+                clearTimeout(timeout);
+                rawJSON += data.substring(index);
+            }
+            console.log(rawJSON);
           });
 
           serialPort.on('open', function() {
             console.log(`probing ${port.comName}`);
-            setTimeout(function() {
+            timeout = setTimeout(function() {
               if (!responds) {
                 console.log(`Port ${port.comName} timed out`);
                 serialPort.close();
+                clearTimeout(timeout);
               }
             }, 2000);
           });
@@ -266,12 +212,8 @@ class MicroBlocksAdapter extends Adapter {
               console.log('device at',
                           port.comName,
                           'successfully disconnected');
-              protocol.serialPort = null;
             }
           });
-
-          serialPort.write(protocol.packMessage(
-            'broadcast', 0, protocol.packString('moz-pair')));
         }
       });
     });
