@@ -26,6 +26,7 @@ class MicroBlocksProperty extends Property {
         this.ublocksVarId = description.ublocksVarId;
         this.ublocksVarName = description.ublocksVarName;
         this.setCachedValue(description.value);
+        this.requestingChange = false;
         this.device.notifyPropertyChanged(this);
 
         this.poller = setInterval(
@@ -48,6 +49,7 @@ class MicroBlocksProperty extends Property {
      * the value passed in.
      */
     setValue(value, clientOnly) {
+        if (!clientOnly) { this.requestingChange = true; }
         return new Promise((resolve, reject) => {
             super.setValue(value).then((updatedValue) => {
                 resolve(updatedValue);
@@ -82,7 +84,6 @@ class MicroBlocksDevice extends Device {
 
     notifyPropertyChanged(property, clientOnly) {
         super.notifyPropertyChanged(property);
-        console.log('property', property.name, 'changed to', property.value);
         if (!clientOnly) {
             let variable = this.findVar(property.ublocksVarName);
             this.serialPort.write(
@@ -421,7 +422,11 @@ class MicroBlocksAdapter extends Adapter {
         variable.type = type;
         if (variable.property) {
             // second parameter asks to not notify this update back to µBlocks
-            variable.property.setValue(varValue, true);
+            if (!variable.property.requestingChange) {
+                variable.property.setValue(varValue, true);
+            } else {
+                variable.property.requestingChange = false;
+            }
         }
     }
 
