@@ -15,6 +15,24 @@ const {
     Property,
 } = require('gateway-addon');
 
+// Utils: to be moved into a class of their own
+
+function uBlocksValue(value, typeName) {
+    if (typeName === 'boolean') {
+        return [ 3, value && 1 || 0 ];
+    } else {
+        const level = Math.floor(value);
+        return [
+            1,
+            level & 255,
+            (level >> 8) & 255,
+            (level >> 16) & 255,
+            (level >> 24) & 255,
+        ];
+    }
+    // TODO string type not yet supported
+}
+
 // Adapter
 
 class MicroBlocksProperty extends Property {
@@ -51,6 +69,7 @@ class MicroBlocksDevice extends Device {
         const myself = this;
         this.name = serialPort.thingName;
         this.type = serialPort.thingCapability || 'thing';
+        this['@type'] = [ serialPort.thingCapability || 'thing' ];
         console.log('thing type is', this.type);
         this.serialPort = serialPort;
         this.variables = serialPort.variables;
@@ -75,7 +94,7 @@ class MicroBlocksDevice extends Device {
         super.notifyPropertyChanged(property);
         if (!clientOnly) {
             console.log('sendProperty', propertyName);
-            const value = this.uBlocksValue(property.value, property.type);
+            const value = uBlocksValue(property.value, property.type);
             this.serialPort.write(
                 this.packVariableMessage(variable.id, value)
             );
@@ -97,22 +116,6 @@ class MicroBlocksDevice extends Device {
         return string.split('').map(
             function (char) { return char.charCodeAt(0); }
         );
-    }
-
-    uBlocksValue(value, typeName) {
-        if (typeName === 'boolean') {
-            return [ 3, value && 1 || 0 ];
-        } else {
-            const level = Math.floor(value);
-            return [
-                1,
-                level & 255,
-                (level >> 8) & 255,
-                (level >> 16) & 255,
-                (level >> 24) & 255,
-            ];
-        }
-        // TODO string type not yet supported
     }
 }
 
@@ -216,13 +219,13 @@ class MicroBlocksAdapter extends Adapter {
                 }
                 this.buffer = this.buffer.slice(5 + dataSize);
                 // there may be the start of a new message left to process
-                this.processBuffer();
+                this.processBuffer(serialPort);
             }
         } else if (check === 0xFA) {
             // short message
             this.buffer = this.buffer.slice(3);
             // there may be the start of a new message left to process
-            this.processBuffer();
+            this.processBuffer(serialPort);
         } else {
             // missed a message header, or we're not talking to a µBlocks board
             this.buffer = [];
@@ -231,10 +234,26 @@ class MicroBlocksAdapter extends Adapter {
     }
 
     getPayload(dataSize) {
-        return String.fromCharCode.apply(
-            null,
-            this.buffer.slice(5, 5 + dataSize)
-        ).replace(/\u0002/g, ''); // remove null chars
+        let typeByte = this.buffer[5];
+        let value =
+            String.fromCharCode.apply(
+                null,
+                this.buffer.slice(6, 5 + dataSize));
+        if (typeByte === 1) {
+            // int type
+            return parseInt(value);
+        } else if (typeByte === 2) {
+            // string type
+            return value;
+        } else if (typeByte === 3) {
+            // boolean type
+            return value === 'true'
+        } else {
+            // not a variable, get the full string
+            return String.fromCharCode.apply(
+                null,
+                this.buffer.slice(5, 5 + dataSize));
+        }
     }
 
     discoveredDevice(serialPort) {
@@ -340,8 +359,7 @@ class MicroBlocksAdapter extends Adapter {
     }
 
     cancelPairing() {
-        // need to get to the serialport
-        console.log(this);
+        // how to get to the serialport instance to close it?
     }
 
     /**
