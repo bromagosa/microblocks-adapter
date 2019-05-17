@@ -18,12 +18,27 @@ const {
 // Adapter
 
 class MicroBlocksProperty extends Property {
-    constructor(device, description) {
+    constructor(device, description, variable) {
         super(device, description.title, description);
+        const myself = this;
+        variable.property = this;
         this.unit = description.unit;
+        this.name = description.title;
+        this.ublocksVarId = description.ublocksVarId;
         this.ublocksVarName = description.ublocksVarName;
         this.setCachedValue(description.value);
         this.device.notifyPropertyChanged(this);
+
+        this.poller = setInterval(
+            function() {
+                myself.device.serialPort.write([
+                    0xFA,               // short message
+                    0x07,               // getVarValue opCode
+                    myself.ublocksVarId // var ID
+                ]);
+            },
+            1000
+        );
     }
 
     /**
@@ -55,33 +70,33 @@ class MicroBlocksDevice extends Device {
         this.variables = mockThing.variables;
 
         mockThing.properties.forEach(function (description) {
-            description.value =
-                myself.variables.find(function(variable) {
-                    return variable.name = description.ublocksVarName
-                }).value;
+            let variable = myself.findVar(description.ublocksVarName);
+            description.value = variable.value;
+            description.ublocksVarId = variable.id;
             myself.properties.set(
                 description.ublocksVarName,
-                new MicroBlocksProperty(myself, description)
+                new MicroBlocksProperty(myself, description, variable)
             );
         });
     }
 
     notifyPropertyChanged(property, clientOnly) {
-        const propertyName = property.ublocksVarName || property.name;
         super.notifyPropertyChanged(property);
-        let variable = this.variables.find(function (variable) {
-            return variable.name === propertyName;
-        });
+        let variable = this.findVar(property.ublocksVarName);
         if (!clientOnly) {
-            console.log('sendProperty', propertyName);
-            const value = this.adapter.packValue(property.value, property.type);
-            console.log('value', value);
-            let message = this.adapter.packVariableMessage(variable.id, value);
-            console.log('message', message);
-            this.serialPort.write(message);
+            this.serialPort.write(
+                this.adapter.packSetVariableMessage(
+                    variable.id,
+                    property.value,
+                    variable.type));
         }
     }
 
+    findVar(varName) {
+        return this.variables.find(function(variable) {
+            return variable.name === varName;
+        });
+    }
 }
 
 class MicroBlocksAdapter extends Adapter {
@@ -145,6 +160,9 @@ class MicroBlocksAdapter extends Adapter {
             if (thing.serialPort && thing.serialPort.isOpen) {
                 thing.serialPort.close();
             }
+            thing.properties.forEach(function (property) {
+                clearInterval(property.poller);
+            });
             this.devices.delete(thing.id);
             this.handleDeviceRemoved(thing);
             resolve(thing);
@@ -246,7 +264,8 @@ class MicroBlocksAdapter extends Adapter {
                     this.processVariableValue(
                         mockThing,
                         objectId,
-                        this.getPayload(dataSize)
+                        this.getPayload(dataSize),
+                        this.getPayloadType()
                     );
                 } else if (opCode === 0x1B) {
                     // broadcast opCode
@@ -278,25 +297,38 @@ class MicroBlocksAdapter extends Adapter {
      * @return {int, boolean, string} the parsed value in its proper type.
      */
     getPayload(dataSize) {
-        let typeByte = this.buffer[5];
-        let value =
-            String.fromCharCode.apply(
-                null,
-                this.buffer.slice(6, 5 + dataSize));
-        if (typeByte === 1) {
-            // int type
-            return parseInt(value);
-        } else if (typeByte === 2) {
-            // string type
-            return value;
-        } else if (typeByte === 3) {
-            // boolean type
-            return value === 'true'
-        } else {
+        let typeByte = this.getPayloadType();
+        if (typeByte === -1) {
             // not a variable, get the full string
             return String.fromCharCode.apply(
                 null,
                 this.buffer.slice(5, 5 + dataSize));
+        } else if (typeByte === 1) {
+            // int
+            // TODO
+        } else if (typeByte === 2) {
+            // string
+            return String.fromCharCode.apply(
+                null,
+                this.buffer.slice(6, 5 + dataSize));
+        } else if (typeByte === 3) {
+            // boolean
+            return this.buffer[6] === 1;
+        } else {
+        }
+    }
+
+    /**
+     * Determine the type of the payload of the message being currently
+     * process. Only makes sense for variables.
+     *
+     * @return {int} MicroBlocks variable type byte.
+     */
+    getPayloadType() {
+        if (this.buffer[5] <= 3) {
+            return this.buffer[5];
+        } else {
+            return -1;
         }
     }
 
@@ -359,12 +391,13 @@ class MicroBlocksAdapter extends Adapter {
         mockThing.variables[objectId] = {
             name: varName,
             id: objectId,
-            value: 0
+            value: 0,
+            type: 'unknown'
         };
-        // let's ask for the var content
+        // let's ask for the var value
         mockThing.serialPort.write([
             0xFA,           // short message
-            0x07,           // getVar opCode
+            0x07,           // getVarValue opCode
             objectId        // var ID
         ]);
     }
@@ -379,10 +412,22 @@ class MicroBlocksAdapter extends Adapter {
      * @param {mockThing} mock thing object where we store all properties.
      * @param {objectId} MicroBlocks variable id
      * @param {varValue} MicroBlocks variable content, properly typed
+     * @param {varType} MicroBlocks variable type string (boolean, int, string)
      */
-    processVariableValue(mockThing, objectId, varValue) {
+    processVariableValue(mockThing, objectId, varValue, type) {
         let variable = mockThing.variables[objectId];
         variable.value = varValue;
+        variable.type = type;
+        if (variable.property) {
+            console.log(
+                'updating property',
+                variable.property.name,
+                'to',
+                varValue
+            );
+            // second parameter asks to not notify this update back to µBlocks
+            variable.property.setValue(varValue, true);
+        }
     }
 
     /**
@@ -411,15 +456,15 @@ class MicroBlocksAdapter extends Adapter {
 
     /**
      * Pack a "set variable value" MicroBlocks serial message, including the
-     * variable id and value and ready to be sent via serial port.
+     * variable id, type and value and ready to be sent via serial port.
      *
      * @param {varId} MicroBlocks variable id
      * @param {value} MicroBlocks variable content
      * @return {Array} An array of bytes ready to be sent to the board.
      */
-    packVariableMessage(varId, value) {
+    packSetVariableMessage(varId, value, type) {
         let message = [0xFB, 0x08, varId];
-        let data = this.packString(value.toString()).concat(0xFE);
+        let data = this.packValue(value, type).concat(0xFE);
         // add the data size in little endian
         message.push(data.length & 255);
         message.push((data.length >> 8) & 255);
@@ -448,11 +493,9 @@ class MicroBlocksAdapter extends Adapter {
      * @param {typeName} the name of the value type. (boolean, int, string)
      * @return {Array} An array of bytes.
      */
-    packValue(value, typeName) {
-        // TODO string type not yet supported
-        if (typeName === 'boolean') {
-            return [ 3, value && 1 || 0 ];
-        } else {
+    packValue(value, type) {
+        if (type === 1) {
+            // int
             const level = Math.floor(value);
             return [
                 1,
@@ -461,6 +504,12 @@ class MicroBlocksAdapter extends Adapter {
                 (level >> 16) & 255,
                 (level >> 24) & 255,
             ];
+        } else if (type === 2) {
+            // string
+            // TODO
+        } else if (type === 3) {
+            // boolean
+            return [ 3, value && 1 || 0 ];
         }
     }
 }
