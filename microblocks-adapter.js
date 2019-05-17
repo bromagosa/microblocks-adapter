@@ -46,16 +46,15 @@ class MicroBlocksProperty extends Property {
 }
 
 class MicroBlocksDevice extends Device {
-    constructor(adapter, mockDevice) {
-        super(adapter, mockDevice.thingName);
+    constructor(adapter, mockThing) {
+        super(adapter, mockThing.name);
         const myself = this;
-        this.name = mockDevice.thingName;
-        this.type = mockDevice.thingCapability || 'thing';
-        this['@type'] = [ this.type ];
-        this.serialPort = mockDevice.serialPort;
-        this.variables = mockDevice.variables;
+        this.name = mockThing.name;
+        this['@type'] = mockThing.capability;
+        this.serialPort = mockThing.serialPort;
+        this.variables = mockThing.variables;
 
-        mockDevice.thingProperties.forEach(function (description) {
+        mockThing.properties.forEach(function (description) {
             description.value =
                 myself.variables.find(function(variable) {
                     return variable.name = description.ublocksVarName
@@ -105,10 +104,10 @@ class MicroBlocksAdapter extends Adapter {
         });
     }
 
-    addDevice(mockDevice) {
-        if (!this.devices.has(mockDevice.thingName)) {
-            console.log('adding new thing named', mockDevice.thingName);
-            const device = new MicroBlocksDevice(this, mockDevice);
+    addDevice(mockThing) {
+        if (!this.devices.has(mockThing.name)) {
+            console.log('adding new thing named', mockThing.name);
+            const device = new MicroBlocksDevice(this, mockThing);
             this.devices.set(device.name, device);
             this.handleDeviceAdded(device);
             return device;
@@ -116,7 +115,7 @@ class MicroBlocksAdapter extends Adapter {
             // TODO
             console.log(
                 'TODO: should be updating board named',
-                mockDevice.thingName
+                mockThing.name
             );
         }
     }
@@ -154,7 +153,7 @@ class MicroBlocksAdapter extends Adapter {
 
     /**
      * Test this port to see if there's a µBlocks device in it. If so, we store
-     * everything into a mock device instance until the whole definition is
+     * everything into a mock thing instance until the whole definition is
      * complete, and only then we create a new MicroBlocksDevice.
      *
      * @param {port} serial port object to probe.
@@ -165,24 +164,32 @@ class MicroBlocksAdapter extends Adapter {
             const serialPort =
                 new SerialPort(port.comName, { baudRate: 115200 });
 
-            let mockDevice = {
+            let mockThing = {
                 variables: [],
-                serialPort: serialPort
-            }
+                serialPort: serialPort,
+                properties: []
+            };
 
             serialPort.on('data', function (data) {
                 myself.buffer = myself.buffer.concat(data.toJSON().data);
-                myself.processBuffer(mockDevice);
+                myself.processBuffer(mockThing);
             });
 
             serialPort.on('open', function() {
                 console.log(`probing ${port.comName}`);
-
-                // we ask the board for its variable names
+                // We ask the board to restart all tasks so we can receive its
+                // thing and property definitions via broadcasts. We also ask
+                // for all its variable names.
                 this.write([
-                    0xFA,       // short message
-                    0x09,       // getVarNames opCode
-                    0x00        // object ID (irrelevant)
+                    0xFA,           // short message
+                    0x06,           // stopAll opCode
+                    0x00,           // object ID (irrelevant)
+                    0xFA,           // short message
+                    0x05,           // startAll opCode
+                    0x00,           // object ID (irrelevant)
+                    0xFA,           // short message
+                    0x09,           // getVarNames opCode
+                    0x00            // object ID (irrelevant)
                 ]);
 
                 this.discoveryTimeout = setTimeout(function() {
@@ -199,7 +206,7 @@ class MicroBlocksAdapter extends Adapter {
                         port.comName,
                         'because it was unplugged');
                     myself.removeThing(device).then(() => {
-                        mockDevice.serialPort = null;
+                        mockThing.serialPort = null;
                     });
                 } else {
                     console.log('device at',
@@ -214,51 +221,49 @@ class MicroBlocksAdapter extends Adapter {
      * Process the current serial port buffer to see if there's a complete
      * message to be parsed, and parse it if so.
      *
-     * @param {mockDevice} mock device object where we store all properties.
+     * @param {mockThing} mock thing object where we store all properties.
      */
-    processBuffer(mockDevice) {
+    processBuffer(mockThing) {
         let check = this.buffer[0];
         let opCode = this.buffer[1];
         let objectId = this.buffer[2];
         let dataSize = this.buffer[3] | this.buffer[4] << 8;
 
         if (check === 0xFB) {
+            this.discoveredDevice(mockThing);
             // long message
             if (this.buffer.length >= dataSize + 5) {
                 // message is complete
                 if (opCode === 0x1D) {
-                    // variableName opCode
-                    this.discoveredDevice(mockDevice);
-                    this.setDescriptionTimeout(mockDevice);
                     // variableName message is complete
                     this.processVariableName(
-                        mockDevice,
+                        mockThing,
                         objectId,
                         this.getPayload(dataSize)
                     );
                 } else if (opCode === 0x15) {
                     // variableValue opCode
                     this.processVariableValue(
-                        mockDevice,
+                        mockThing,
                         objectId,
                         this.getPayload(dataSize)
                     );
                 } else if (opCode === 0x1B) {
                     // broadcast opCode
                     this.processBroadcast(
-                        mockDevice,
+                        mockThing,
                         this.getPayload(dataSize)
                     );
                 }
                 this.buffer = this.buffer.slice(5 + dataSize);
                 // there may be the start of a new message left to process
-                this.processBuffer(mockDevice);
+                this.processBuffer(mockThing);
             }
         } else if (check === 0xFA) {
             // short message
             this.buffer = this.buffer.slice(3);
             // there may be the start of a new message left to process
-            this.processBuffer(mockDevice);
+            this.processBuffer(mockThing);
         } else {
             // missed a message header, or we're not talking to a µBlocks board
             this.buffer = [];
@@ -297,19 +302,17 @@ class MicroBlocksAdapter extends Adapter {
 
     /**
      * Called when a MicroBlocks device has been discovered. We clear the
-     * serial port discovery timeout and add an array field to the mock device
-     * to store incoming properties.
+     * serial port discovery timeout.
      *
-     * @param {mockDevice} mock device object where we store all properties.
+     * @param {mockThing} mock thing object where we store all properties.
      */
-    discoveredDevice(mockDevice) {
-        if (mockDevice.serialPort.discoveryTimeout) {
-            mockDevice.thingProperties = [];
+    discoveredDevice(mockThing) {
+        if (mockThing.serialPort.discoveryTimeout) {
             console.log(
                 'found MicroBlocks device at',
-                mockDevice.serialPort.path);
-            clearTimeout(mockDevice.serialPort.discoveryTimeout);
-            mockDevice.serialPort.discoveryTimeout = null;
+                mockThing.serialPort.path);
+            clearTimeout(mockThing.serialPort.discoveryTimeout);
+            mockThing.serialPort.discoveryTimeout = null;
         }
     }
 
@@ -318,48 +321,48 @@ class MicroBlocksAdapter extends Adapter {
      * descriptions. If we don't get any in time, we close the connection
      * and we don't add this device.
      *
-     * @param {mockDevice} mock device object where we store all properties.
+     * @param {mockThing} mock thing object where we store all properties.
      */
-    setDescriptionTimeout(mockDevice) {
+    setPropertiesTimeout(mockThing) {
         const myself = this;
-        if (!mockDevice.serialPort.descriptionTimeout) {
-            mockDevice.serialPort.descriptionTimeout = setTimeout(function() {
-                if (mockDevice.thingProperties.length > 0) {
+        if (!mockThing.serialPort.propertiesTimeout) {
+            mockThing.serialPort.propertiesTimeout = setTimeout(function() {
+                if (mockThing.properties.length > 0) {
                     console.log(
                         'Thing description at ',
-                        mockDevice.serialPort.path,
+                        mockThing.serialPort.path,
                         'complete');
-                    myself.addDevice(mockDevice);
+                    myself.addDevice(mockThing);
                 } else {
                     console.log(
                         'Incomplete description for thing at',
-                        mockDevice.serialPort.path
+                        mockThing.serialPort.path
                     );
-                    mockDevice.serialPort.close();
+                    mockThing.serialPort.close();
                 }
                 clearTimeout(this);
-                mockDevice.serialPort.descriptionTimeout = null;
+                mockThing.serialPort.propertiesTimeout = null;
             },
             2000);
         }
     }
 
     /**
-     * Process and store variable names into the mock device, and ask for their
+     * Process and store variable names into the mock thing, and ask for their
      * content too.
      *
-     * @param {mockDevice} mock device object where we store all properties.
+     * @param {mockThing} mock thing object where we store all properties.
      * @param {objectId} MicroBlocks variable id
      * @param {varName} MicroBlocks variable name
      */
-    processVariableName(mockDevice, objectId, varName) {
-        mockDevice.variables[objectId] = {
+    processVariableName(mockThing, objectId, varName) {
+        mockThing.variables[objectId] = {
             name: varName,
             id: objectId,
             value: 0
         };
         // let's ask for the var content
-        mockDevice.serialPort.write([
+        mockThing.serialPort.write([
             0xFA,           // short message
             0x07,           // getVar opCode
             objectId        // var ID
@@ -367,57 +370,42 @@ class MicroBlocksAdapter extends Adapter {
     }
 
     /**
-     * Process and store variable values into the mock device. If the variable
+     * Process and store variable values into the mock thing. If the variable
      * contains the thing's name or capability, we store those into the mock
      * device. Once we have both, our thing is defined and we can ask the board
      * to restart all its scripts so that we can intercept the property
      * description broadcasts.
      *
-     * @param {mockDevice} mock device object where we store all properties.
+     * @param {mockThing} mock thing object where we store all properties.
      * @param {objectId} MicroBlocks variable id
      * @param {varValue} MicroBlocks variable content, properly typed
      */
-    processVariableValue(mockDevice, objectId, varValue) {
-        let variable = mockDevice.variables[objectId];
+    processVariableValue(mockThing, objectId, varValue) {
+        let variable = mockThing.variables[objectId];
         variable.value = varValue;
-        if (variable.name === '_wot_thingName') {
-            mockDevice.thingName = varValue;
-        } else if (variable.name === '_wot_thingCapability') {
-            mockDevice.thingCapability = varValue;
-        }
-        if (!mockDevice.thingDefined &&
-                mockDevice.thingName &&
-                mockDevice.thingCapability) {
-            mockDevice.thingDefined = true;
-            // Thing is defined. Let's ask the board to restart all tasks so we
-            // can receive its property definitions via broadcasts
-            mockDevice.serialPort.write([
-                0xFA,           // short message
-                0x06,           // stopAll opCode
-                0x00,           // object ID (irrelevant)
-                0xFA,           // short message
-                0x05,           // startAll opCode
-                0x00            // object ID (irrelevant)
-            ]);
-        }
     }
 
     /**
      * Process a broadcast message coming from the board. If it describes a
-     * thing property, we parse it and add it to our mock device's property
+     * thing property, we parse it and add it to our mock thing's property
      * list.
      *
-     * @param {mockDevice} mock device object where we store all properties.
+     * @param {mockThing} mock thing object where we store all properties.
      * @param {message} MicroBlocks message content, as a string
      */
-    processBroadcast(mockDevice, message) {
-        let property;
-        if (message.indexOf('moz-property') === 0) {
-            property = JSON.parse(message.substring(12));
+    processBroadcast(mockThing, message) {
+        let json;
+        if (message.indexOf('moz-thing') === 0) {
+            json = JSON.parse(message.substring(9));
+            mockThing.name = json.name;
+            mockThing.capability = json['@type'];
+            this.setPropertiesTimeout(mockThing);
+        } else if (message.indexOf('moz-property') === 0) {
+            json = JSON.parse(message.substring(12));
             // get the variable name from the href: "/properties/varName" field
-            property.ublocksVarName = property.href.substring(12);
-            mockDevice.thingProperties.push(property);
-            console.log('got property', property.title);
+            json.ublocksVarName = json.href.substring(12);
+            mockThing.properties.push(json);
+            console.log('got property', json.title);
         }
     }
 
