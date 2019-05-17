@@ -15,24 +15,6 @@ const {
     Property,
 } = require('gateway-addon');
 
-// Utils: to be moved into a class of their own
-
-function uBlocksValue(value, typeName) {
-    if (typeName === 'boolean') {
-        return [ 3, value && 1 || 0 ];
-    } else {
-        const level = Math.floor(value);
-        return [
-            1,
-            level & 255,
-            (level >> 8) & 255,
-            (level >> 16) & 255,
-            (level >> 24) & 255,
-        ];
-    }
-    // TODO string type not yet supported
-}
-
 // Adapter
 
 class MicroBlocksProperty extends Property {
@@ -87,16 +69,17 @@ class MicroBlocksDevice extends Device {
 
     notifyPropertyChanged(property, clientOnly) {
         const propertyName = property.ublocksVarName || property.name;
+        super.notifyPropertyChanged(property);
         let variable = this.variables.find(function (variable) {
             return variable.name === propertyName;
         });
-        super.notifyPropertyChanged(property);
         if (!clientOnly) {
             console.log('sendProperty', propertyName);
-            const value = uBlocksValue(property.value, property.type);
-            this.serialPort.write(
-                this.adapter.packVariableMessage(variable.id, value)
-            );
+            const value = this.adapter.packValue(property.value, property.type);
+            console.log('value', value);
+            let message = this.adapter.packVariableMessage(variable.id, value);
+            console.log('message', message);
+            this.serialPort.write(message);
         }
     }
 
@@ -467,6 +450,30 @@ class MicroBlocksAdapter extends Adapter {
         return string.split('').map(
             function (char) { return char.charCodeAt(0); }
         );
+    }
+
+    /**
+     * Pack a value as an array of bytes in theMicroBlocks VM format, including
+     * its type.
+     *
+     * @param {value} the value to be packed.
+     * @param {typeName} the name of the value type. (boolean, int, string)
+     * @return {Array} An array of bytes.
+     */
+    packValue(value, typeName) {
+        // TODO string type not yet supported
+        if (typeName === 'boolean') {
+            return [ 3, value && 1 || 0 ];
+        } else {
+            const level = Math.floor(value);
+            return [
+                1,
+                level & 255,
+                (level >> 8) & 255,
+                (level >> 16) & 255,
+                (level >> 24) & 255,
+            ];
+        }
     }
 }
 
