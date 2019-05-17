@@ -19,11 +19,10 @@ const {
 
 class MicroBlocksProperty extends Property {
     constructor(device, description, variable) {
-        super(device, description.title, description);
+        super(device, variable.name, description);
         const myself = this;
         variable.property = this;
         this.unit = description.unit;
-        this.name = description.title;
         this.ublocksVarId = description.ublocksVarId;
         this.ublocksVarName = description.ublocksVarName;
         this.setCachedValue(description.value);
@@ -65,6 +64,7 @@ class MicroBlocksDevice extends Device {
         super(adapter, mockThing.name);
         const myself = this;
         this.name = mockThing.name;
+        this.type = mockThing.capability ? mockThing.capability[0] : 'thing';
         this['@type'] = mockThing.capability;
         this.serialPort = mockThing.serialPort;
         this.variables = mockThing.variables;
@@ -82,8 +82,9 @@ class MicroBlocksDevice extends Device {
 
     notifyPropertyChanged(property, clientOnly) {
         super.notifyPropertyChanged(property);
-        let variable = this.findVar(property.ublocksVarName);
+        console.log('property', property.name, 'changed to', property.value);
         if (!clientOnly) {
+            let variable = this.findVar(property.ublocksVarName);
             this.serialPort.write(
                 this.adapter.packSetVariableMessage(
                     variable.id,
@@ -419,12 +420,6 @@ class MicroBlocksAdapter extends Adapter {
         variable.value = varValue;
         variable.type = type;
         if (variable.property) {
-            console.log(
-                'updating property',
-                variable.property.name,
-                'to',
-                varValue
-            );
             // second parameter asks to not notify this update back to µBlocks
             variable.property.setValue(varValue, true);
         }
