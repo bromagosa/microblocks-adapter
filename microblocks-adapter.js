@@ -307,7 +307,8 @@ class MicroBlocksAdapter extends Adapter {
                 this.buffer.slice(5, 5 + dataSize));
         } else if (typeByte === 1) {
             // int
-            // TODO
+            return (this.buffer[9] << 24) | (this.buffer[8] << 16) |
+                        (this.buffer[7] << 8) | (this.buffer[6]);
         } else if (typeByte === 2) {
             // string
             return String.fromCharCode.apply(
@@ -506,7 +507,7 @@ class MicroBlocksAdapter extends Adapter {
             ];
         } else if (type === 2) {
             // string
-            // TODO
+            return [ 2 ].concat(this.packString(value));
         } else if (type === 3) {
             // boolean
             return [ 3, value && 1 || 0 ];
