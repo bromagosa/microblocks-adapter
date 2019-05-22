@@ -2,7 +2,7 @@
   "name": "microblocks-adapter",
   "display_name": "MicroBlocks",
   "author": "MicroBlocks",
-  "version": "0.1.5",
+  "version": "0.2",
   "description": "MicroBlocks adapter plugin for Mozilla IoT Gateway",
   "main": "index.js",
   "keywords": [
@@ -23,7 +23,6 @@
   "files": [
     "LICENSE",
     "SHA256SUMS",
-    "uprotocol.js",
     "microblocks-adapter.js",
     "index.js",
     "node_modules"
