@@ -228,6 +228,11 @@ class MicroBlocksAdapter extends Adapter {
         if (err && err.disconnected) {
           console.log('removing device at', port.comName,
                       'because it was unplugged');
+          const device = this.devices.get(mockThing.name);
+          if (!device) {
+            console.warn('Unable to remove device associated with', mockThing);
+            return;
+          }
           this.removeThing(device).then(() => {
             mockThing.serialPort = null;
           });
