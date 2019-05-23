@@ -2,8 +2,8 @@
   "name": "microblocks-adapter",
   "display_name": "MicroBlocks",
   "author": "MicroBlocks",
-  "version": "0.2",
-  "description": "MicroBlocks adapter plugin for Mozilla IoT Gateway",
+  "version": "0.2.0",
+  "description": "MicroBlocks adapter plugin for Mozilla WebThings Gateway",
   "main": "index.js",
   "keywords": [
     "mozilla",
@@ -36,9 +36,9 @@
     "exec": "{nodeLoader} {path}"
   },
   "dependencies": {
-    "serialport": "^6.2.0"
+    "serialport": "^6.2.2"
   },
   "devDependencies": {
-    "eslint": "^4.19.1"
+    "eslint": "^5.13.0"
   }
 }
