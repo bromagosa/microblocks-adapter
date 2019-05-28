@@ -112,7 +112,6 @@ class MicroBlocksAdapter extends Adapter {
     super(addonManager, 'MicroBlocks', packageName);
     // boards are indexed by name
     this.devices = new Map();
-    this.buffer = [];
     addonManager.addAdapter(this);
 
     this.startPairing();
@@ -166,12 +165,12 @@ class MicroBlocksAdapter extends Adapter {
    */
   removeThing(thing) {
     return new Promise((resolve) => {
-      if (thing.serialPort && thing.serialPort.isOpen) {
-        thing.serialPort.close();
-      }
       thing.properties.forEach(function(property) {
         clearInterval(property.poller);
       });
+      if (thing.serialPort && thing.serialPort.isOpen) {
+        thing.serialPort.close();
+      }
       this.devices.delete(thing.id);
       this.handleDeviceRemoved(thing);
       resolve(thing);
@@ -191,13 +190,14 @@ class MicroBlocksAdapter extends Adapter {
         new SerialPort(port.comName, {baudRate: 115200});
 
       const mockThing = {
+        buffer: [],
         variables: [],
         serialPort: serialPort,
         properties: [],
       };
 
       serialPort.on('data', (data) => {
-        this.buffer = this.buffer.concat(data.toJSON().data);
+        mockThing.buffer = mockThing.buffer.concat(data.toJSON().data);
         this.processBuffer(mockThing);
       });
 
@@ -246,50 +246,50 @@ class MicroBlocksAdapter extends Adapter {
    * @param {mockThing} mock thing object where we store all properties.
    */
   processBuffer(mockThing) {
-    const check = this.buffer[0];
-    const opCode = this.buffer[1];
-    const objectId = this.buffer[2];
-    const dataSize = this.buffer[3] | this.buffer[4] << 8;
+    const check = mockThing.buffer[0];
+    const opCode = mockThing.buffer[1];
+    const objectId = mockThing.buffer[2];
+    const dataSize = mockThing.buffer[3] | mockThing.buffer[4] << 8;
 
     if (check === 0xFB) {
       this.discoveredDevice(mockThing);
       // long message
-      if (this.buffer.length >= dataSize + 5) {
+      if (mockThing.buffer.length >= dataSize + 5) {
         // message is complete
         if (opCode === 0x1D) {
           // variableName message is complete
           this.processVariableName(
             mockThing,
             objectId,
-            this.getPayload(dataSize)
+            this.getPayload(mockThing, dataSize)
           );
         } else if (opCode === 0x15) {
           // variableValue opCode
           this.processVariableValue(
             mockThing,
             objectId,
-            this.getPayload(dataSize),
-            this.getPayloadType()
+            this.getPayload(mockThing, dataSize),
+            this.getPayloadType(mockThing)
           );
         } else if (opCode === 0x1B) {
           // broadcast opCode
           this.processBroadcast(
             mockThing,
-            this.getPayload(dataSize)
+            this.getPayload(mockThing, dataSize)
           );
         }
-        this.buffer = this.buffer.slice(5 + dataSize);
+        mockThing.buffer = mockThing.buffer.slice(5 + dataSize);
         // there may be the start of a new message left to process
         this.processBuffer(mockThing);
       }
     } else if (check === 0xFA) {
       // short message
-      this.buffer = this.buffer.slice(3);
+      mockThing.buffer = mockThing.buffer.slice(3);
       // there may be the start of a new message left to process
       this.processBuffer(mockThing);
     } else {
       // missed a message header, or we're not talking to a µBlocks board
-      this.buffer = [];
+      mockThing.buffer = [];
     }
   }
 
@@ -299,25 +299,25 @@ class MicroBlocksAdapter extends Adapter {
    * @param {dataSize} amount of bytes to read.
    * @return {int, boolean, string} the parsed value in its proper type.
    */
-  getPayload(dataSize) {
-    const typeByte = this.getPayloadType();
+  getPayload(mockThing, dataSize) {
+    const typeByte = this.getPayloadType(mockThing);
     if (typeByte === -1) {
       // not a variable, get the full string
       return String.fromCharCode.apply(
         null,
-        this.buffer.slice(5, 5 + dataSize));
+        mockThing.buffer.slice(5, 5 + dataSize));
     } else if (typeByte === 1) {
       // int
-      return (this.buffer[9] << 24) | (this.buffer[8] << 16) |
-            (this.buffer[7] << 8) | (this.buffer[6]);
+      return (mockThing.buffer[9] << 24) | (mockThing.buffer[8] << 16) |
+            (mockThing.buffer[7] << 8) | (mockThing.buffer[6]);
     } else if (typeByte === 2) {
       // string
       return String.fromCharCode.apply(
         null,
-        this.buffer.slice(6, 5 + dataSize));
+        mockThing.buffer.slice(6, 5 + dataSize));
     } else if (typeByte === 3) {
       // boolean
-      return this.buffer[6] === 1;
+      return mockThing.buffer[6] === 1;
     }
   }
 
@@ -327,9 +327,9 @@ class MicroBlocksAdapter extends Adapter {
    *
    * @return {int} MicroBlocks variable type byte.
    */
-  getPayloadType() {
-    if (this.buffer[5] <= 3) {
-      return this.buffer[5];
+  getPayloadType(mockThing) {
+    if (mockThing.buffer[5] <= 3) {
+      return mockThing.buffer[5];
     } else {
       return -1;
     }
