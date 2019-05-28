@@ -114,8 +114,7 @@ class MicroBlocksAdapter extends Adapter {
     this.devices = new Map();
     this.buffer = [];
     addonManager.addAdapter(this);
-
-    this.startPairing();
+    startPairing();
   }
 
   startPairing(_timeoutSeconds) {
@@ -208,13 +207,7 @@ class MicroBlocksAdapter extends Adapter {
         // for all its variable names.
         this.write([
           0xFA,       // short message
-          0x06,       // stopAll opCode
-          0x00,       // object ID (irrelevant)
-          0xFA,       // short message
           0x05,       // startAll opCode
-          0x00,       // object ID (irrelevant)
-          0xFA,       // short message
-          0x09,       // getVarNames opCode
           0x00,       // object ID (irrelevant)
         ]);
 
@@ -223,7 +216,7 @@ class MicroBlocksAdapter extends Adapter {
           serialPort.close();
           clearTimeout(this);
           serialPort.discoveryTimeout = null;
-        }, 2000);
+        }, 1000);
       });
 
       serialPort.on('close', (err) => {
@@ -451,6 +444,12 @@ class MicroBlocksAdapter extends Adapter {
       mockThing.name = json.name;
       mockThing.capability = json['@type'];
       this.setPropertiesTimeout(mockThing);
+      console.log('found thing description');
+      mockThing.serialPort.write([
+          0xFA,       // short message
+          0x09,       // getVarNames opCode
+          0x00,       // object ID (irrelevant)
+      ]);
     } else if (message.indexOf('moz-property') === 0) {
       json = JSON.parse(message.substring(12));
       // get the variable name from the href: "/properties/varName" field
