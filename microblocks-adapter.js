@@ -114,7 +114,8 @@ class MicroBlocksAdapter extends Adapter {
     this.devices = new Map();
     this.buffer = [];
     addonManager.addAdapter(this);
-    startPairing();
+
+    this.startPairing();
   }
 
   startPairing(_timeoutSeconds) {
