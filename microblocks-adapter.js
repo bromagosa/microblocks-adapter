@@ -13,6 +13,7 @@ const {
   Adapter,
   Device,
   Property,
+  Event,
 } = require('gateway-addon');
 
 // Adapter
@@ -353,8 +354,8 @@ class MicroBlocksAdapter extends Adapter {
 
   /**
    * Start a timeout of 2 seconds that waits for the device property
-   * descriptions. If we don't get any in time, we close the connection
-   * and we don't add this device.
+   * descriptions. If we don't get any in time, we understand the device has no
+   * properties.
    *
    * @param {mockThing} mock thing object where we store all properties.
    */
@@ -362,19 +363,11 @@ class MicroBlocksAdapter extends Adapter {
     const myself = this;
     if (!mockThing.serialPort.propertiesTimeout) {
       mockThing.serialPort.propertiesTimeout = setTimeout(function() {
-        if (mockThing.properties.length > 0) {
-          console.log(
-            'Thing description at ',
-            mockThing.serialPort.path,
-            'complete');
-          myself.addDevice(mockThing);
-        } else {
-          console.log(
-            'Incomplete description for thing at',
-            mockThing.serialPort.path
-          );
-          mockThing.serialPort.close();
-        }
+        console.log(
+          'Thing description at ',
+          mockThing.serialPort.path,
+          'complete');
+        myself.addDevice(mockThing);
         clearTimeout(this);
         mockThing.serialPort.propertiesTimeout = null;
       }, 2000);
@@ -457,6 +450,20 @@ class MicroBlocksAdapter extends Adapter {
       json.ublocksVarName = json.href.substring(12);
       mockThing.properties.push(json);
       console.log('got property', json.title);
+    } else if (message.indexOf('moz-event') === 0) {
+      json = JSON.parse(message.substring(9));
+      let device = this.getDevice(mockThing.name);
+      if (device) {
+        if (!device.events.has(json['@type'])) {
+          console.log('adding event', json['@type']);
+          device.addEvent(json['@type'], json);
+        }
+        console.log('handling event', json.name, 'of type', json['@type']);
+        device.eventNotify(new Event(device, json.name, json)
+        );
+      } else {
+        console.log('unhandled event', json.name, 'of type', json['@type']);
+      }
     }
   }
 
