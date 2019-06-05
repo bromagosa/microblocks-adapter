@@ -86,6 +86,9 @@ class MicroBlocksDevice extends Device {
         new MicroBlocksProperty(myself, description, variable)
       );
     });
+    mockThing.events.forEach(function(description) {
+      myself.addEvent(description.name, description.metadata);
+    });
   }
 
   notifyPropertyChanged(property, clientOnly) {
@@ -195,6 +198,7 @@ class MicroBlocksAdapter extends Adapter {
         variables: [],
         serialPort: serialPort,
         properties: [],
+        events: [],
       };
 
       serialPort.on('data', (data) => {
@@ -207,11 +211,16 @@ class MicroBlocksAdapter extends Adapter {
         // We ask the board to restart all tasks so we can receive its
         // thing and property definitions via broadcasts. We also ask
         // for all its variable names.
-        this.write([
-          0xFA,       // short message
-          0x05,       // startAll opCode
-          0x00,       // object ID (irrelevant)
-        ]);
+        setTimeout(function() {
+          serialPort.write([
+            0xFA,       // short message
+            0x06,       // stopAll opCode
+            0x00,       // object ID (irrelevant)
+            0xFA,       // short message
+            0x05,       // startAll opCode
+            0x00,       // object ID (irrelevant)
+          ]);
+        }, 500);
 
         this.discoveryTimeout = setTimeout(function() {
           console.log(`Port ${port.comName} timed out`);
@@ -449,20 +458,23 @@ class MicroBlocksAdapter extends Adapter {
       // get the variable name from the href: "/properties/varName" field
       json.ublocksVarName = json.href.substring(12);
       mockThing.properties.push(json);
-      console.log('got property', json.title);
+      console.log('registered property', json.title);
     } else if (message.indexOf('moz-event') === 0) {
       json = JSON.parse(message.substring(9));
+      mockThing.events.push(json);
+      console.log('registered event', json.name);
+    } else {
       let device = this.getDevice(mockThing.name);
       if (device) {
-        if (!device.events.has(json['@type'])) {
-          console.log('adding event', json['@type']);
-          device.addEvent(json['@type'], json);
-        }
-        console.log('handling event', json.name, 'of type', json['@type']);
-        device.eventNotify(new Event(device, json.name, json)
+        console.log('got message', message, 'and treating it as an event');
+        let eventDescription = device.events.get(message);
+        console.log(eventDescription);
+        device.eventNotify(
+          new Event(
+            device,
+            eventDescription['@type'],
+            eventDescription.name)
         );
-      } else {
-        console.log('unhandled event', json.name, 'of type', json['@type']);
       }
     }
   }
