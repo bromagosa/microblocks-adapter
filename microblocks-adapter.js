@@ -211,16 +211,11 @@ class MicroBlocksAdapter extends Adapter {
         // We ask the board to restart all tasks so we can receive its
         // thing and property definitions via broadcasts. We also ask
         // for all its variable names.
-        setTimeout(function() {
-          serialPort.write([
-            0xFA,       // short message
-            0x06,       // stopAll opCode
-            0x00,       // object ID (irrelevant)
-            0xFA,       // short message
-            0x05,       // startAll opCode
-            0x00,       // object ID (irrelevant)
-          ]);
-        }, 500);
+        serialPort.write([
+          0xFA,       // short message
+          0x05,       // startAll opCode
+          0x00,       // object ID (irrelevant)
+        ]);
 
         this.discoveryTimeout = setTimeout(function() {
           console.log(`Port ${port.comName} timed out`);
@@ -287,6 +282,9 @@ class MicroBlocksAdapter extends Adapter {
             mockThing,
             this.getPayload(mockThing, dataSize)
           );
+        } else if (opCode === 0x14) {
+          // outputValue opCode (for debugging)
+          console.log('board says:', this.getPayload(mockThing, dataSize));
         }
         mockThing.buffer = mockThing.buffer.slice(5 + dataSize);
         // there may be the start of a new message left to process
@@ -299,7 +297,14 @@ class MicroBlocksAdapter extends Adapter {
       this.processBuffer(mockThing);
     } else {
       // missed a message header, or we're not talking to a µBlocks board
-      mockThing.buffer = [];
+      let checkIndex = mockThing.buffer.indexOf(0xFB);
+      if (checkIndex > -1) {
+        // our message starts somewhere in the middle of the buffer
+        mockThing.buffer = mockThing.buffer.slice(checkIndex);
+        this.processBuffer(mockThing);
+      } else {
+        mockThing.buffer = [];
+      }
     }
   }
 
