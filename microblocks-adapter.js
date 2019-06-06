@@ -284,7 +284,7 @@ class MicroBlocksAdapter extends Adapter {
           );
         } else if (opCode === 0x14) {
           // outputValue opCode (for debugging)
-          console.log('board says:', this.getPayload(mockThing, dataSize));
+          console.log('device says:', this.getPayload(mockThing, dataSize));
         }
         mockThing.buffer = mockThing.buffer.slice(5 + dataSize);
         // there may be the start of a new message left to process
@@ -471,15 +471,11 @@ class MicroBlocksAdapter extends Adapter {
     } else {
       let device = this.getDevice(mockThing.name);
       if (device) {
-        console.log('got message', message, 'and treating it as an event');
         let eventDescription = device.events.get(message);
-        console.log(eventDescription);
-        device.eventNotify(
-          new Event(
-            device,
-            eventDescription['@type'],
-            eventDescription.name)
-        );
+        if (eventDescription) {
+          console.log('got event', eventDescription.name);
+          device.eventNotify(new Event(device, eventDescription.name));
+        }
       }
     }
   }
