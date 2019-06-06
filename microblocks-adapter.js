@@ -473,8 +473,8 @@ class MicroBlocksAdapter extends Adapter {
       if (device) {
         let eventDescription = device.events.get(message);
         if (eventDescription) {
-          console.log('got event', eventDescription.name);
-          device.eventNotify(new Event(device, eventDescription.name));
+          console.log('got event', message);
+          device.eventNotify(new Event(device, message));
         }
       }
     }
