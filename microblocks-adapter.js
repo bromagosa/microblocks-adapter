@@ -297,7 +297,7 @@ class MicroBlocksAdapter extends Adapter {
       this.processBuffer(mockThing);
     } else {
       // missed a message header, or we're not talking to a µBlocks board
-      let checkIndex = mockThing.buffer.indexOf(0xFB);
+      const checkIndex = mockThing.buffer.indexOf(0xFB);
       if (checkIndex > -1) {
         // our message starts somewhere in the middle of the buffer
         mockThing.buffer = mockThing.buffer.slice(checkIndex);
@@ -454,9 +454,9 @@ class MicroBlocksAdapter extends Adapter {
       this.setPropertiesTimeout(mockThing);
       console.log('found thing description');
       mockThing.serialPort.write([
-          0xFA,       // short message
-          0x09,       // getVarNames opCode
-          0x00,       // object ID (irrelevant)
+        0xFA,       // short message
+        0x09,       // getVarNames opCode
+        0x00,       // object ID (irrelevant)
       ]);
     } else if (message.indexOf('moz-property') === 0) {
       json = JSON.parse(message.substring(12));
@@ -469,9 +469,9 @@ class MicroBlocksAdapter extends Adapter {
       mockThing.events.push(json);
       console.log('registered event', json.name);
     } else {
-      let device = this.getDevice(mockThing.name);
+      const device = this.getDevice(mockThing.name);
       if (device) {
-        let eventDescription = device.events.get(message);
+        const eventDescription = device.events.get(message);
         if (eventDescription) {
           console.log('got event', message);
           device.eventNotify(new Event(device, message));
