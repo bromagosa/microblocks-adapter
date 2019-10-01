@@ -8,6 +8,7 @@
 
 'use strict';
 
+const manifest = require('./manifest.json');
 const SerialPort = require('serialport');
 const {
   Adapter,
@@ -112,8 +113,8 @@ class MicroBlocksDevice extends Device {
 
 class MicroBlocksAdapter extends Adapter {
 
-  constructor(addonManager, packageName) {
-    super(addonManager, 'MicroBlocks', packageName);
+  constructor(addonManager) {
+    super(addonManager, manifest.name, manifest.id);
     // boards are indexed by name
     this.devices = new Map();
     addonManager.addAdapter(this);
@@ -540,8 +541,8 @@ class MicroBlocksAdapter extends Adapter {
   }
 }
 
-function loadMicroBlocksAdapter(addonManager, manifest, _errorCallback) {
-  new MicroBlocksAdapter(addonManager, manifest.name);
+function loadMicroBlocksAdapter(addonManager) {
+  new MicroBlocksAdapter(addonManager);
 }
 
 module.exports = loadMicroBlocksAdapter;
