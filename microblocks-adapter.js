@@ -8,6 +8,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const manifest = require('./manifest.json');
 const SerialPort = require('serialport');
 const {
@@ -70,7 +71,10 @@ class MicroBlocksProperty extends Property {
 
 class MicroBlocksDevice extends Device {
   constructor(adapter, mockThing) {
-    super(adapter, mockThing.name);
+    const shasum = crypto.createHash('sha1');
+    shasum.update(mockThing.name);
+    super(adapter, `microblocks-${shasum.digest('hex')}`);
+
     const myself = this;
     this.name = mockThing.name;
     this.type = mockThing.capability ? mockThing.capability[0] : 'thing';
