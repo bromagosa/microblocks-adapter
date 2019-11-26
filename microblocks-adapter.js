@@ -488,7 +488,8 @@ class MicroBlocksAdapter extends Adapter {
       }
       if (json.name &&
           !mockThing.events.find(function(evt) {
-            return evt.name === json.name; })) {
+            return evt.name === json.name;
+          })) {
         mockThing.events.push(json);
         console.log('registered event', json.name);
       }
