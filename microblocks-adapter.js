@@ -209,8 +209,7 @@ class MicroBlocksAdapter extends Adapter {
       serialPort.on('open', function() {
         console.log(`probing ${port.comName}`);
         // We ask the board to restart all tasks so we can receive its
-        // thing and property definitions via broadcasts. We also ask
-        // for all its variable names.
+        // thing and property definitions via broadcasts.
         serialPort.write([
           0xFA,       // short message
           0x05,       // startAll opCode
@@ -376,9 +375,14 @@ class MicroBlocksAdapter extends Adapter {
   setPropertiesTimeout(mockThing) {
     const myself = this;
     if (!mockThing.serialPort.propertiesTimeout) {
+      mockThing.serialPort.write([
+        0xFA,       // short message
+        0x09,       // getVarNames opCode
+        0x00,       // object ID (irrelevant)
+      ]);
       mockThing.serialPort.propertiesTimeout = setTimeout(function() {
         console.log(
-          'Thing description at ',
+          'Thing description at',
           mockThing.serialPort.path,
           'complete');
         myself.addDevice(mockThing);
@@ -461,11 +465,6 @@ class MicroBlocksAdapter extends Adapter {
         mockThing.capability = json['@type'];
         this.setPropertiesTimeout(mockThing);
         console.log('found thing description');
-        mockThing.serialPort.write([
-          0xFA,       // short message
-          0x09,       // getVarNames opCode
-          0x00,       // object ID (irrelevant)
-        ]);
       }
     } else if (message.indexOf('moz-property') === 0) {
       try {
@@ -487,7 +486,9 @@ class MicroBlocksAdapter extends Adapter {
         console.log('moz-event message was corrupt');
         json = {};
       }
-      if (json.name) {
+      if (json.name &&
+          !mockThing.events.find(function(evt) {
+            return evt.name === json.name; })) {
         mockThing.events.push(json);
         console.log('registered event', json.name);
       }
