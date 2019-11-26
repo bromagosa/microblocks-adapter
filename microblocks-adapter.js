@@ -35,12 +35,9 @@ class MicroBlocksProperty extends Property {
     this.poller = setInterval(
       function() {
         myself.device.serialPort.write([
-          // short message
-          0xFA,
-          // getVarValue opCode
-          0x07,
-          // var ID
-          myself.ublocksVarId,
+          0xFA,                 // short message
+          0x07,                 // getVarValue opCode
+          myself.ublocksVarId,  // var ID
         ]);
       },
       1000
@@ -73,10 +70,12 @@ class MicroBlocksDevice extends Device {
   constructor(adapter, mockThing) {
     const shasum = crypto.createHash('sha1');
     shasum.update(mockThing.name);
-    super(adapter, `microblocks-${shasum.digest('hex')}`);
+    mockThing.id = `microblocks-${shasum.digest('hex')}`;
+    super(adapter, mockThing.id);
 
     const myself = this;
     this.name = mockThing.name;
+    this.id = mockThing.id;
     this.type = mockThing.capability ? mockThing.capability[0] : 'thing';
     this['@type'] = mockThing.capability;
     this.serialPort = mockThing.serialPort;
@@ -137,18 +136,14 @@ class MicroBlocksAdapter extends Adapter {
   }
 
   addDevice(mockThing) {
-    if (!this.devices.has(mockThing.name)) {
+    if (!this.devices.has(mockThing.id)) {
       console.log('adding new thing named', mockThing.name);
       const device = new MicroBlocksDevice(this, mockThing);
-      this.devices.set(device.name, device);
+      this.devices.set(device.id, device);
       this.handleDeviceAdded(device);
       return device;
     } else {
-      // TODO
-      console.log(
-        'TODO: should be updating board named',
-        mockThing.name
-      );
+      console.log('found existing thing named', mockThing.name);
     }
   }
 
@@ -234,7 +229,7 @@ class MicroBlocksAdapter extends Adapter {
         if (err && err.disconnected) {
           console.log('removing device at', port.comName,
                       'because it was unplugged');
-          const device = this.devices.get(mockThing.name);
+          const device = this.devices.get(mockThing.id);
           if (!device) {
             console.warn('Unable to remove device associated with', mockThing);
             return;
@@ -474,7 +469,7 @@ class MicroBlocksAdapter extends Adapter {
       mockThing.events.push(json);
       console.log('registered event', json.name);
     } else {
-      const device = this.getDevice(mockThing.name);
+      const device = this.getDevice(mockThing.id);
       if (device) {
         const eventDescription = device.events.get(message);
         if (eventDescription) {
