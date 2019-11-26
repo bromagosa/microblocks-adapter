@@ -425,14 +425,16 @@ class MicroBlocksAdapter extends Adapter {
    */
   processVariableValue(mockThing, objectId, varValue, type) {
     const variable = mockThing.variables[objectId];
-    variable.value = varValue;
-    variable.type = type;
-    if (variable.property) {
-      // second parameter asks to not notify this update back to µBlocks
-      if (!variable.property.requestingChange) {
-        variable.property.setValue(varValue, true);
-      } else {
-        variable.property.requestingChange = false;
+    if (variable) {
+      variable.value = varValue;
+      variable.type = type;
+      if (variable.property) {
+        // second parameter asks to not notify this update back to µBlocks
+        if (!variable.property.requestingChange) {
+          variable.property.setValue(varValue, true);
+        } else {
+          variable.property.requestingChange = false;
+        }
       }
     }
   }
@@ -448,26 +450,47 @@ class MicroBlocksAdapter extends Adapter {
   processBroadcast(mockThing, message) {
     let json;
     if (message.indexOf('moz-thing') === 0) {
-      json = JSON.parse(message.substring(9));
-      mockThing.name = json.name;
-      mockThing.capability = json['@type'];
-      this.setPropertiesTimeout(mockThing);
-      console.log('found thing description');
-      mockThing.serialPort.write([
-        0xFA,       // short message
-        0x09,       // getVarNames opCode
-        0x00,       // object ID (irrelevant)
-      ]);
+      try {
+        json = JSON.parse(message.substring(9));
+      } catch (err) {
+        console.log('moz-thing message was corrupt');
+        json = {};
+      }
+      if (json.name) {
+        mockThing.name = json.name;
+        mockThing.capability = json['@type'];
+        this.setPropertiesTimeout(mockThing);
+        console.log('found thing description');
+        mockThing.serialPort.write([
+          0xFA,       // short message
+          0x09,       // getVarNames opCode
+          0x00,       // object ID (irrelevant)
+        ]);
+      }
     } else if (message.indexOf('moz-property') === 0) {
-      json = JSON.parse(message.substring(12));
-      // get the variable name from the href: "/properties/varName" field
-      json.ublocksVarName = json.href.substring(12);
-      mockThing.properties.push(json);
-      console.log('registered property', json.title);
+      try {
+        json = JSON.parse(message.substring(12));
+      } catch (err) {
+        console.log('moz-property message was corrupt');
+        json = {};
+      }
+      if (json.href) {
+        // get the variable name from the href: "/properties/varName" field
+        json.ublocksVarName = json.href.substring(12);
+        mockThing.properties.push(json);
+        console.log('registered property', json.title);
+      }
     } else if (message.indexOf('moz-event') === 0) {
-      json = JSON.parse(message.substring(9));
-      mockThing.events.push(json);
-      console.log('registered event', json.name);
+      try {
+        json = JSON.parse(message.substring(9));
+      } catch (err) {
+        console.log('moz-event message was corrupt');
+        json = {};
+      }
+      if (json.name) {
+        mockThing.events.push(json);
+        console.log('registered event', json.name);
+      }
     } else {
       const device = this.getDevice(mockThing.id);
       if (device) {
