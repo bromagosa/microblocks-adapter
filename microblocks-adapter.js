@@ -105,7 +105,7 @@ class MicroBlocksDevice extends Device {
           variable.id,
           property.value,
           variable.type));
-        this.serialPort.drain();
+      this.serialPort.drain();
     }
   }
 
