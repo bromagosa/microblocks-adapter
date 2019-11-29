@@ -39,6 +39,7 @@ class MicroBlocksProperty extends Property {
           0x07,                 // getVarValue opCode
           myself.ublocksVarId,  // var ID
         ]);
+        myself.device.serialPort.drain();
       },
       1000
     );
@@ -104,6 +105,7 @@ class MicroBlocksDevice extends Device {
           variable.id,
           property.value,
           variable.type));
+        this.serialPort.drain();
     }
   }
 
@@ -174,6 +176,7 @@ class MicroBlocksAdapter extends Adapter {
       });
       if (thing.serialPort && thing.serialPort.isOpen) {
         thing.serialPort.close();
+        thing.serialPort = null;
       }
       this.devices.delete(thing.id);
       this.handleDeviceRemoved(thing);
@@ -215,6 +218,7 @@ class MicroBlocksAdapter extends Adapter {
           0x05,       // startAll opCode
           0x00,       // object ID (irrelevant)
         ]);
+        serialPort.drain();
 
         this.discoveryTimeout = setTimeout(function() {
           console.log(`Port ${port.comName} timed out`);
@@ -222,6 +226,10 @@ class MicroBlocksAdapter extends Adapter {
           clearTimeout(this);
           serialPort.discoveryTimeout = null;
         }, 1000);
+      });
+
+      serialPort.on('error', (err) => {
+        console.log('Serialport Error:', err);
       });
 
       serialPort.on('close', (err) => {
@@ -238,6 +246,7 @@ class MicroBlocksAdapter extends Adapter {
           });
         } else {
           console.log('device at', port.comName, 'successfully disconnected');
+          mockThing.serialPort = null;
         }
       });
     }
@@ -380,6 +389,7 @@ class MicroBlocksAdapter extends Adapter {
         0x09,       // getVarNames opCode
         0x00,       // object ID (irrelevant)
       ]);
+      mockThing.serialPort.drain();
       mockThing.serialPort.propertiesTimeout = setTimeout(function() {
         console.log(
           'Thing description at',
@@ -413,6 +423,7 @@ class MicroBlocksAdapter extends Adapter {
       0x07,       // getVarValue opCode
       objectId,   // var ID
     ]);
+    mockThing.serialPort.drain();
   }
 
   /**
