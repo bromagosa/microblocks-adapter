@@ -122,6 +122,8 @@ class MicroBlocksAdapter extends Adapter {
     super(addonManager, manifest.name, manifest.id);
     // boards are indexed by name
     this.devices = new Map();
+    this.radioPackets = {};
+
     addonManager.addAdapter(this);
 
     this.startPairing();
@@ -504,6 +506,13 @@ class MicroBlocksAdapter extends Adapter {
         mockThing.events.push(json);
         console.log('registered event', json.name);
       }
+    } else if (message.indexOf('moz-packet') === 0) {
+        this.processRadioPacket(
+            mockThing,
+            message.substring(10).split(',').map(       // Turn string back into
+                (s) => { return parseInt(s); }          // charCode array
+            )
+        );
     } else {
       const device = this.getDevice(mockThing.id);
       if (device) {
@@ -514,6 +523,67 @@ class MicroBlocksAdapter extends Adapter {
         }
       }
     }
+  }
+
+  processRadioPacket(mockThing, packet) {
+    if (!packet[0] === 31) { return; }
+    let index = packet[1]
+    let strLength = packet[2]
+    let crc = packet[3];
+    if (!this.radioPackets[crc]) { this.radioPackets[crc] = []; }
+    for (var i = 4; i < 32; i++) {
+      if (packet[i] !== 0) {
+        this.radioPackets[crc][((index - 1) * 28) + i - 4] = packet[i];
+      }
+    }
+    let string = String.fromCharCode.apply(null, this.radioPackets[crc]);
+    if (string.length === strLength) {
+      // We got the last packet. Let's make sure CRCs match
+      let computedCRC =
+        this.radioPackets[crc].reduce((acc, current, i) => {
+            return acc + (current * (i + 1));
+        }, strLength) % 255;
+      if (computedCRC === crc) {
+        console.log('Got radio string:', string);
+        this.radioPackets[crc] = null;
+        if (string.indexOf('moz-thing') === 0) {
+          const newThing = {
+            buffer: [],
+            variables: [],
+            serialPort: mockThing.serialPort,
+            properties: [],
+            events: [],
+          };
+          this.processBroadcast(newThing, string);
+        } else {
+          this.processBroadcast(mockThing, string);
+        }
+      } else {
+        // Ask the bridge to ask the board to resend
+        // TODO: The bridge doesn't yet listen for these messages
+        mockThing.serialPort.write(
+          this.packBroadcastMessage('moz-resend:' + crc)
+        );
+      }
+    }
+  }
+
+  /**
+   * Pack a "broadcast" MicroBlocks serial message, including the
+   * message payload.
+   *
+   * @param {message} MicroBlocks broadcast message content
+   * @return {Array} An array of bytes ready to be sent to the board.
+   */
+  packBroadcastMessage(message) {
+    let message = [0xFB, 0x1B];
+    const data = this.packValue(message, 2).concat(0xFE); // 2 is string type
+    // add the data size in little endian
+    message.push(data.length & 255);
+    message.push((data.length >> 8) & 255);
+    // add the data to the message
+    message = message.concat(data);
+    return message;
   }
 
   /**
