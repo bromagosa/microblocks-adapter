@@ -152,6 +152,12 @@ class MicroBlocksAdapter extends Adapter {
     }
   }
 
+  deviceAtPort(serialPort) {
+    return [...this.devices.values()].find(
+      function (device) { return device.serialPort === serialPort; }
+    );
+  }
+
   cancelPairing() {
     // how to get to the serialport instance to close it?
   }
@@ -244,9 +250,9 @@ class MicroBlocksAdapter extends Adapter {
           console.log('removing device at', port.comName,
                       'because it was unplugged');
           //TODO find device connected to this port, instead of using its id
-          const device = this.devices.get(mockThing.id);
+          const device = this.deviceAtPort(serialPort);
           if (!device) {
-            console.warn('Unable to remove device associated with', mockThing);
+            console.warn('Unable to remove device at', port.comName);
             return;
           }
           this.removeThing(device);
