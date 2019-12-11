@@ -35,13 +35,11 @@ class MicroBlocksProperty extends Property {
     this.poller = setInterval(
       function() {
         myself.device.serialPort.write([
-          // short message
-          0xFA,
-          // getVarValue opCode
-          0x07,
-          // var ID
-          myself.ublocksVarId,
+          0xFA,                 // short message
+          0x07,                 // getVarValue opCode
+          myself.ublocksVarId,  // var ID
         ]);
+        myself.device.serialPort.drain();
       },
       1000
     );
@@ -73,10 +71,12 @@ class MicroBlocksDevice extends Device {
   constructor(adapter, mockThing) {
     const shasum = crypto.createHash('sha1');
     shasum.update(mockThing.name);
-    super(adapter, `microblocks-${shasum.digest('hex')}`);
+    mockThing.id = `microblocks-${shasum.digest('hex')}`;
+    super(adapter, mockThing.id);
 
     const myself = this;
     this.name = mockThing.name;
+    this.id = mockThing.id;
     this.type = mockThing.capability ? mockThing.capability[0] : 'thing';
     this['@type'] = mockThing.capability;
     this.serialPort = mockThing.serialPort;
@@ -105,6 +105,7 @@ class MicroBlocksDevice extends Device {
           variable.id,
           property.value,
           variable.type));
+      this.serialPort.drain();
     }
   }
 
@@ -137,18 +138,14 @@ class MicroBlocksAdapter extends Adapter {
   }
 
   addDevice(mockThing) {
-    if (!this.devices.has(mockThing.name)) {
+    if (!this.devices.has(mockThing.id)) {
       console.log('adding new thing named', mockThing.name);
       const device = new MicroBlocksDevice(this, mockThing);
-      this.devices.set(device.name, device);
+      this.devices.set(device.id, device);
       this.handleDeviceAdded(device);
       return device;
     } else {
-      // TODO
-      console.log(
-        'TODO: should be updating board named',
-        mockThing.name
-      );
+      console.log('found existing thing named', mockThing.name);
     }
   }
 
@@ -179,6 +176,7 @@ class MicroBlocksAdapter extends Adapter {
       });
       if (thing.serialPort && thing.serialPort.isOpen) {
         thing.serialPort.close();
+        thing.serialPort = null;
       }
       this.devices.delete(thing.id);
       this.handleDeviceRemoved(thing);
@@ -214,13 +212,13 @@ class MicroBlocksAdapter extends Adapter {
       serialPort.on('open', function() {
         console.log(`probing ${port.comName}`);
         // We ask the board to restart all tasks so we can receive its
-        // thing and property definitions via broadcasts. We also ask
-        // for all its variable names.
+        // thing and property definitions via broadcasts.
         serialPort.write([
           0xFA,       // short message
           0x05,       // startAll opCode
           0x00,       // object ID (irrelevant)
         ]);
+        serialPort.drain();
 
         this.discoveryTimeout = setTimeout(function() {
           console.log(`Port ${port.comName} timed out`);
@@ -230,11 +228,15 @@ class MicroBlocksAdapter extends Adapter {
         }, 1000);
       });
 
+      serialPort.on('error', (err) => {
+        console.log('Serialport Error:', err);
+      });
+
       serialPort.on('close', (err) => {
         if (err && err.disconnected) {
           console.log('removing device at', port.comName,
                       'because it was unplugged');
-          const device = this.devices.get(mockThing.name);
+          const device = this.devices.get(mockThing.id);
           if (!device) {
             console.warn('Unable to remove device associated with', mockThing);
             return;
@@ -244,6 +246,7 @@ class MicroBlocksAdapter extends Adapter {
           });
         } else {
           console.log('device at', port.comName, 'successfully disconnected');
+          mockThing.serialPort = null;
         }
       });
     }
@@ -381,9 +384,15 @@ class MicroBlocksAdapter extends Adapter {
   setPropertiesTimeout(mockThing) {
     const myself = this;
     if (!mockThing.serialPort.propertiesTimeout) {
+      mockThing.serialPort.write([
+        0xFA,       // short message
+        0x09,       // getVarNames opCode
+        0x00,       // object ID (irrelevant)
+      ]);
+      mockThing.serialPort.drain();
       mockThing.serialPort.propertiesTimeout = setTimeout(function() {
         console.log(
-          'Thing description at ',
+          'Thing description at',
           mockThing.serialPort.path,
           'complete');
         myself.addDevice(mockThing);
@@ -414,6 +423,7 @@ class MicroBlocksAdapter extends Adapter {
       0x07,       // getVarValue opCode
       objectId,   // var ID
     ]);
+    mockThing.serialPort.drain();
   }
 
   /**
@@ -430,14 +440,16 @@ class MicroBlocksAdapter extends Adapter {
    */
   processVariableValue(mockThing, objectId, varValue, type) {
     const variable = mockThing.variables[objectId];
-    variable.value = varValue;
-    variable.type = type;
-    if (variable.property) {
-      // second parameter asks to not notify this update back to µBlocks
-      if (!variable.property.requestingChange) {
-        variable.property.setValue(varValue, true);
-      } else {
-        variable.property.requestingChange = false;
+    if (variable) {
+      variable.value = varValue;
+      variable.type = type;
+      if (variable.property) {
+        // second parameter asks to not notify this update back to µBlocks
+        if (!variable.property.requestingChange) {
+          variable.property.setValue(varValue, true);
+        } else {
+          variable.property.requestingChange = false;
+        }
       }
     }
   }
@@ -453,28 +465,47 @@ class MicroBlocksAdapter extends Adapter {
   processBroadcast(mockThing, message) {
     let json;
     if (message.indexOf('moz-thing') === 0) {
-      json = JSON.parse(message.substring(9));
-      mockThing.name = json.name;
-      mockThing.capability = json['@type'];
-      this.setPropertiesTimeout(mockThing);
-      console.log('found thing description');
-      mockThing.serialPort.write([
-        0xFA,       // short message
-        0x09,       // getVarNames opCode
-        0x00,       // object ID (irrelevant)
-      ]);
+      try {
+        json = JSON.parse(message.substring(9));
+      } catch (err) {
+        console.log('moz-thing message was corrupt');
+        json = {};
+      }
+      if (json.name) {
+        mockThing.name = json.name;
+        mockThing.capability = json['@type'];
+        this.setPropertiesTimeout(mockThing);
+        console.log('found thing description');
+      }
     } else if (message.indexOf('moz-property') === 0) {
-      json = JSON.parse(message.substring(12));
-      // get the variable name from the href: "/properties/varName" field
-      json.ublocksVarName = json.href.substring(12);
-      mockThing.properties.push(json);
-      console.log('registered property', json.title);
+      try {
+        json = JSON.parse(message.substring(12));
+      } catch (err) {
+        console.log('moz-property message was corrupt');
+        json = {};
+      }
+      if (json.href) {
+        // get the variable name from the href: "/properties/varName" field
+        json.ublocksVarName = json.href.substring(12);
+        mockThing.properties.push(json);
+        console.log('registered property', json.title);
+      }
     } else if (message.indexOf('moz-event') === 0) {
-      json = JSON.parse(message.substring(9));
-      mockThing.events.push(json);
-      console.log('registered event', json.name);
+      try {
+        json = JSON.parse(message.substring(9));
+      } catch (err) {
+        console.log('moz-event message was corrupt');
+        json = {};
+      }
+      if (json.name &&
+          !mockThing.events.find(function(evt) {
+            return evt.name === json.name;
+          })) {
+        mockThing.events.push(json);
+        console.log('registered event', json.name);
+      }
     } else {
-      const device = this.getDevice(mockThing.name);
+      const device = this.getDevice(mockThing.id);
       if (device) {
         const eventDescription = device.events.get(message);
         if (eventDescription) {
