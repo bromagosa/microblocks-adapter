@@ -21,13 +21,11 @@ const {
 // Adapter
 
 class MicroBlocksProperty extends Property {
-  constructor(device, description, variable) {
-    super(device, variable.name, description);
+  constructor(device, description) {
+    super(device, description.name, description);
     const myself = this;
-    variable.property = this;
     this.unit = description.unit;
-    this.ublocksVarId = description.ublocksVarId;
-    this.ublocksVarName = description.ublocksVarName;
+    this.varName = description.varName;
     this.setCachedValue(description.value);
     this.requestingChange = false;
     this.device.notifyPropertyChanged(this);
@@ -68,50 +66,49 @@ class MicroBlocksProperty extends Property {
 }
 
 class MicroBlocksDevice extends Device {
-  constructor(adapter, mockThing) {
-    const shasum = crypto.createHash('sha1');
-    shasum.update(mockThing.name);
-    mockThing.id = `microblocks-${shasum.digest('hex')}`;
-    super(adapter, mockThing.id);
+  constructor(adapter, thingDescription, serialPort) {
+    super(adapter, thingDescription.id, serialPort);
 
     const myself = this;
-    this.name = mockThing.name;
-    this.id = mockThing.id;
-    this.type = mockThing.capability ? mockThing.capability[0] : 'thing';
-    this['@type'] = mockThing.capability;
-    this.serialPort = mockThing.serialPort;
-    this.variables = mockThing.variables;
+    this.name = thingDescription.title;
+    this.id = thingDescription.id;
+    this['@type'] = thingDescription['@type'] || 'thing';
+    this.serialPort = serialPort;
 
-    mockThing.properties.forEach(function(description) {
-      const variable = myself.findVar(description.ublocksVarName);
-      description.value = variable.value;
-      description.ublocksVarId = variable.id;
+    Object.keys(thingDescription.properties).forEach(function(varName) {
+      let description = thingDescription.properties[varName];
+      description.varName = varName;
       myself.properties.set(
-        description.ublocksVarName,
-        new MicroBlocksProperty(myself, description, variable)
+        varName,
+        new MicroBlocksProperty(myself, description)
       );
     });
-    mockThing.events.forEach(function(description) {
-      myself.addEvent(description.name, description.metadata);
-    });
+    if (thingDescription.events) {
+      Object.keys(thingDescription.events).forEach(function(eventName) {
+        let description = thingDescription.events[eventName];
+        myself.addEvent(description.name, description.metadata);
+      });
+    }
   }
 
   notifyPropertyChanged(property, clientOnly) {
     super.notifyPropertyChanged(property);
     if (!clientOnly) {
-      const variable = this.findVar(property.ublocksVarName);
+      //TODO update variable given its name, or request var IDs at some point
+      /*
       this.serialPort.write(
         this.adapter.packSetVariableMessage(
           variable.id,
           property.value,
           variable.type));
       this.serialPort.drain();
+      */
     }
   }
 
   findVar(varName) {
-    return this.variables.find(function(variable) {
-      return variable.name === varName;
+    return this.properties.find(function(property) {
+      return property.varName === varName;
     });
   }
 }
@@ -139,15 +136,19 @@ class MicroBlocksAdapter extends Adapter {
     });
   }
 
-  addDevice(mockThing) {
-    if (!this.devices.has(mockThing.id)) {
-      console.log('adding new thing named', mockThing.name);
-      const device = new MicroBlocksDevice(this, mockThing);
+  addDevice(serialPort, description) {
+    const shasum = crypto.createHash('sha1');
+    shasum.update(description.title);
+    description.id = `microblocks-${shasum.digest('hex')}`;
+    if (!this.devices.has(description.id)) {
+      console.log('adding new thing named', description.title);
+      const device = new MicroBlocksDevice(this, description, serialPort);
       this.devices.set(device.id, device);
+      console.log('id is', device.id);
       this.handleDeviceAdded(device);
       return device;
     } else {
-      console.log('found existing thing named', mockThing.name);
+      console.log('found existing thing named', description.title);
     }
   }
 
@@ -194,32 +195,36 @@ class MicroBlocksAdapter extends Adapter {
    * @param {port} serial port object to probe.
    */
   probePort(port) {
+    const myself = this;
     if (port.vendorId) {
       const serialPort =
         new SerialPort(port.comName, {baudRate: 115200});
 
-      const mockThing = {
-        buffer: [],
-        variables: [],
-        serialPort: serialPort,
-        properties: [],
-        events: [],
-      };
+      serialPort.buffer = [];
 
       serialPort.on('data', (data) => {
-        mockThing.buffer = mockThing.buffer.concat(data.toJSON().data);
-        this.processBuffer(mockThing);
+        serialPort.buffer = serialPort.buffer.concat(data.toJSON().data);
+        this.processData(serialPort);
       });
 
       serialPort.on('open', function() {
         console.log(`probing ${port.comName}`);
-        // We ask the board to restart all tasks so we can receive its
-        // thing and property definitions via broadcasts.
-        serialPort.write([
-          0xFA,       // short message
-          0x05,       // startAll opCode
-          0x00,       // object ID (irrelevant)
-        ]);
+        // We ask the board to give us the value of the '_thing description'
+        // variable
+        serialPort.write([0xFA, 0x00, 0x05]);
+        serialPort.drain();
+        let message = [
+          0xFB,       // long message
+          0x07,       // getVarValue opCode
+          0xFF,       // object ID (made up)
+        ];
+        const data = myself.packString('_thing description').concat(0xFE);
+        // add the data size in little endian
+        message.push(data.length & 255);
+        message.push((data.length >> 8) & 255);
+        // add the data to the message
+        message = message.concat(data);
+        serialPort.write(message);
         serialPort.drain();
 
         this.discoveryTimeout = setTimeout(function() {
@@ -238,17 +243,15 @@ class MicroBlocksAdapter extends Adapter {
         if (err && err.disconnected) {
           console.log('removing device at', port.comName,
                       'because it was unplugged');
+          //TODO find device connected to this port, instead of using its id
           const device = this.devices.get(mockThing.id);
           if (!device) {
             console.warn('Unable to remove device associated with', mockThing);
             return;
           }
-          this.removeThing(device).then(() => {
-            mockThing.serialPort = null;
-          });
+          this.removeThing(device);
         } else {
           console.log('device at', port.comName, 'successfully disconnected');
-          mockThing.serialPort = null;
         }
       });
     }
@@ -260,60 +263,61 @@ class MicroBlocksAdapter extends Adapter {
    *
    * @param {mockThing} mock thing object where we store all properties.
    */
-  processBuffer(mockThing) {
-    const check = mockThing.buffer[0];
-    const opCode = mockThing.buffer[1];
-    const objectId = mockThing.buffer[2];
-    const dataSize = mockThing.buffer[3] | mockThing.buffer[4] << 8;
+  processData(serialPort, mockThing) {
+    const check = serialPort.buffer[0];
+    const opCode = serialPort.buffer[1];
+    const objectId = serialPort.buffer[2];
+    const dataSize = serialPort.buffer[3] | serialPort.buffer[4] << 8;
 
     if (check === 0xFB) {
-      this.discoveredDevice(mockThing);
+      this.discoveredDevice(serialPort);
       // long message
-      if (mockThing.buffer.length >= dataSize + 5) {
+      if (serialPort.buffer.length >= dataSize + 5) {
         // message is complete
         if (opCode === 0x1D) {
           // variableName message is complete
           this.processVariableName(
-            mockThing,
             objectId,
-            this.getPayload(mockThing, dataSize)
+            this.getPayload(serialPort.buffer, dataSize)
           );
         } else if (opCode === 0x15) {
           // variableValue opCode
           this.processVariableValue(
-            mockThing,
+            serialPort,
             objectId,
-            this.getPayload(mockThing, dataSize),
-            this.getPayloadType(mockThing)
+            this.getPayload(serialPort.buffer, dataSize),
+            this.getPayloadType(serialPort.buffer)
           );
         } else if (opCode === 0x1B) {
           // broadcast opCode
           this.processBroadcast(
             mockThing,
-            this.getPayload(mockThing, dataSize)
+            this.getPayload(serialPort.buffer, dataSize)
           );
         } else if (opCode === 0x14) {
           // outputValue opCode (for debugging)
-          console.log('device says:', this.getPayload(mockThing, dataSize));
-        }
-        mockThing.buffer = mockThing.buffer.slice(5 + dataSize);
+          console.log(
+            'device says:',
+            this.getPayload(serialPort.buffer, dataSize));
+        } 
+        serialPort.buffer = serialPort.buffer.slice(5 + dataSize);
         // there may be the start of a new message left to process
-        this.processBuffer(mockThing);
+        this.processData(serialPort);
       }
     } else if (check === 0xFA) {
       // short message
-      mockThing.buffer = mockThing.buffer.slice(3);
+      serialPort.buffer = serialPort.buffer.slice(3);
       // there may be the start of a new message left to process
-      this.processBuffer(mockThing);
+      this.processData(serialPort);
     } else {
       // missed a message header, or we're not talking to a µBlocks board
-      const checkIndex = mockThing.buffer.indexOf(0xFB);
+      const checkIndex = serialPort.buffer.indexOf(0xFB);
       if (checkIndex > -1) {
         // our message starts somewhere in the middle of the buffer
-        mockThing.buffer = mockThing.buffer.slice(checkIndex);
-        this.processBuffer(mockThing);
+        serialPort.buffer = serialPort.buffer.slice(checkIndex);
+        this.processData(serialPort);
       } else {
-        mockThing.buffer = [];
+        serialPort.buffer = [];
       }
     }
   }
@@ -324,25 +328,25 @@ class MicroBlocksAdapter extends Adapter {
    * @param {dataSize} amount of bytes to read.
    * @return {int, boolean, string} the parsed value in its proper type.
    */
-  getPayload(mockThing, dataSize) {
-    const typeByte = this.getPayloadType(mockThing);
+  getPayload(buffer, dataSize) {
+    const typeByte = this.getPayloadType(buffer);
     if (typeByte === -1) {
       // not a variable, get the full string
       return String.fromCharCode.apply(
         null,
-        mockThing.buffer.slice(5, 5 + dataSize));
+        buffer.slice(5, 5 + dataSize));
     } else if (typeByte === 1) {
       // int
-      return (mockThing.buffer[9] << 24) | (mockThing.buffer[8] << 16) |
-            (mockThing.buffer[7] << 8) | (mockThing.buffer[6]);
+      return (buffer[9] << 24) | (buffer[8] << 16) |
+            (buffer[7] << 8) | (buffer[6]);
     } else if (typeByte === 2) {
       // string
       return String.fromCharCode.apply(
         null,
-        mockThing.buffer.slice(6, 5 + dataSize));
+        buffer.slice(6, 5 + dataSize));
     } else if (typeByte === 3) {
       // boolean
-      return mockThing.buffer[6] === 1;
+      return buffer[6] === 1;
     }
   }
 
@@ -352,9 +356,9 @@ class MicroBlocksAdapter extends Adapter {
    *
    * @return {int} MicroBlocks variable type byte.
    */
-  getPayloadType(mockThing) {
-    if (mockThing.buffer[5] <= 3) {
-      return mockThing.buffer[5];
+  getPayloadType(buffer) {
+    if (buffer[5] <= 3) {
+      return buffer[5];
     } else {
       return -1;
     }
@@ -366,66 +370,14 @@ class MicroBlocksAdapter extends Adapter {
    *
    * @param {mockThing} mock thing object where we store all properties.
    */
-  discoveredDevice(mockThing) {
-    if (mockThing.serialPort.discoveryTimeout) {
+  discoveredDevice(serialPort) {
+    if (serialPort.discoveryTimeout) {
       console.log(
         'found MicroBlocks device at',
-        mockThing.serialPort.path);
-      clearTimeout(mockThing.serialPort.discoveryTimeout);
-      mockThing.serialPort.discoveryTimeout = null;
+        serialPort.path);
+      clearTimeout(serialPort.discoveryTimeout);
+      serialPort.discoveryTimeout = null;
     }
-  }
-
-  /**
-   * Start a timeout of 2 seconds that waits for the device property
-   * descriptions. If we don't get any in time, we understand the device has no
-   * properties.
-   *
-   * @param {mockThing} mock thing object where we store all properties.
-   */
-  setPropertiesTimeout(mockThing) {
-    const myself = this;
-    if (!mockThing.serialPort.propertiesTimeout) {
-      mockThing.serialPort.write([
-        0xFA,       // short message
-        0x09,       // getVarNames opCode
-        0x00,       // object ID (irrelevant)
-      ]);
-      mockThing.serialPort.drain();
-      mockThing.serialPort.propertiesTimeout = setTimeout(function() {
-        console.log(
-          'Thing description at',
-          mockThing.serialPort.path,
-          'complete');
-        myself.addDevice(mockThing);
-        clearTimeout(this);
-        mockThing.serialPort.propertiesTimeout = null;
-      }, 2000);
-    }
-  }
-
-  /**
-   * Process and store variable names into the mock thing, and ask for their
-   * content too.
-   *
-   * @param {mockThing} mock thing object where we store all properties.
-   * @param {objectId} MicroBlocks variable id
-   * @param {varName} MicroBlocks variable name
-   */
-  processVariableName(mockThing, objectId, varName) {
-    mockThing.variables[objectId] = {
-      name: varName,
-      id: objectId,
-      value: 0,
-      type: 'unknown',
-    };
-    // let's ask for the var value
-    mockThing.serialPort.write([
-      0xFA,       // short message
-      0x07,       // getVarValue opCode
-      objectId,   // var ID
-    ]);
-    mockThing.serialPort.drain();
   }
 
   /**
@@ -440,19 +392,43 @@ class MicroBlocksAdapter extends Adapter {
    * @param {varValue} MicroBlocks variable content, properly typed
    * @param {varType} MicroBlocks variable type string (boolean, int, string)
    */
-  processVariableValue(mockThing, objectId, varValue, type) {
-    const variable = mockThing.variables[objectId];
-    if (variable) {
-      variable.value = varValue;
-      variable.type = type;
-      if (variable.property) {
-        // second parameter asks to not notify this update back to µBlocks
-        if (!variable.property.requestingChange) {
-          variable.property.setValue(varValue, true);
-        } else {
-          variable.property.requestingChange = false;
+  processVariableValue(serialPort, objectId, varValue, type) {
+    if (objectId === 0xFF) {
+      // we found a new thing!
+      let description = varValue;
+      try {
+        // fix incomplete thing descriptions
+	if (description.endsWith(',')) {
+          // close last property / event
+          description = description.slice(0, -1) + '}}';
+        } else if (description.endsWith('{')) {
+          // no properties
+          description = description + '}}';
+        }
+        this.addDevice(serialPort, JSON.parse(description));
+        console.log('Thing description at', serialPort.path, 'complete');
+      } catch (err) {
+        console.error('Failed to add thing!');
+        console.error(err);
+        console.log(varValue);
+      }
+    } else {
+      // TODO get device associated with serial port and deal with its vars
+      /*
+      const variable = mockThing.variables[objectId];
+      if (variable) {
+        variable.value = varValue;
+        variable.type = type;
+        if (variable.property) {
+          // second parameter asks to not notify this update back to µBlocks
+          if (!variable.property.requestingChange) {
+            variable.property.setValue(varValue, true);
+          } else {
+            variable.property.requestingChange = false;
+          }
         }
       }
+      */
     }
   }
 
@@ -464,63 +440,14 @@ class MicroBlocksAdapter extends Adapter {
    * @param {mockThing} mock thing object where we store all properties.
    * @param {message} MicroBlocks message content, as a string
    */
-  processBroadcast(mockThing, message) {
-    let json;
-    if (message.indexOf('moz-thing') === 0) {
-      try {
-        json = JSON.parse(message.substring(9));
-      } catch (err) {
-        console.log('moz-thing message was corrupt');
-        json = {};
-      }
-      if (json.name) {
-        mockThing.name = json.name;
-        mockThing.capability = json['@type'];
-        this.setPropertiesTimeout(mockThing);
-        console.log('found thing description');
-      }
-    } else if (message.indexOf('moz-property') === 0) {
-      try {
-        json = JSON.parse(message.substring(12));
-      } catch (err) {
-        console.log('moz-property message was corrupt');
-        json = {};
-      }
-      if (json.href) {
-        // get the variable name from the href: "/properties/varName" field
-        json.ublocksVarName = json.href.substring(12);
-        mockThing.properties.push(json);
-        console.log('registered property', json.title);
-      }
-    } else if (message.indexOf('moz-event') === 0) {
-      try {
-        json = JSON.parse(message.substring(9));
-      } catch (err) {
-        console.log('moz-event message was corrupt');
-        json = {};
-      }
-      if (json.name &&
-          !mockThing.events.find(function(evt) {
-            return evt.name === json.name;
-          })) {
-        mockThing.events.push(json);
-        console.log('registered event', json.name);
-      }
-    } else if (message.indexOf('moz-packet') === 0) {
-        this.processRadioPacket(
-            mockThing,
-            message.substring(10).split(',').map(       // Turn string back into
-                (s) => { return parseInt(s); }          // charCode array
-            )
-        );
-    } else {
-      const device = this.getDevice(mockThing.id);
-      if (device) {
-        const eventDescription = device.events.get(message);
-        if (eventDescription) {
-          console.log('got event', message);
-          device.eventNotify(new Event(device, message));
-        }
+  processBroadcast(serialPort, message) {
+    // TODO get device associated to serial port
+    const device = this.getDevice(mockThing.id);
+    if (device) {
+      const eventDescription = device.events.get(message);
+      if (eventDescription) {
+        console.log('got event', message);
+        device.eventNotify(new Event(device, message));
       }
     }
   }
@@ -550,17 +477,19 @@ class MicroBlocksAdapter extends Adapter {
           const newThing = {
             buffer: [],
             variables: [],
+            isRadio: true,
             serialPort: mockThing.serialPort,
             properties: [],
             events: [],
           };
           this.processBroadcast(newThing, string);
         } else {
+          // how to make sure this mockThing is the previously created newThing?
           this.processBroadcast(mockThing, string);
         }
       } else {
         // Ask the bridge to ask the board to resend
-        // TODO: The bridge doesn't yet listen for these messages
+        // TODO The bridge doesn't yet listen for these messages
         mockThing.serialPort.write(
           this.packBroadcastMessage('moz-resend:' + crc)
         );
@@ -618,7 +547,7 @@ class MicroBlocksAdapter extends Adapter {
   }
 
   /**
-   * Pack a value as an array of bytes in theMicroBlocks VM format, including
+   * Pack a value as an array of bytes in the MicroBlocks VM format, including
    * its type.
    *
    * @param {value} the value to be packed.
