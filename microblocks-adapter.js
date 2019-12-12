@@ -25,6 +25,7 @@ class MicroBlocksProperty extends Property {
     super(device, description.name, description);
     const myself = this;
     this.unit = description.unit;
+    this.name = description.title;
     this.varName = description.varName;
     this.setCachedValue(description.value);
     this.requestingChange = false;
@@ -32,12 +33,14 @@ class MicroBlocksProperty extends Property {
 
     this.poller = setInterval(
       function() {
-        myself.device.serialPort.write([
-          0xFA,                 // short message
-          0x07,                 // getVarValue opCode
-          myself.ublocksVarId,  // var ID
-        ]);
-        myself.device.serialPort.drain();
+        if (myself.varId && !myself.requestingChange) {
+          myself.device.serialPort.write([
+            0xFA,          // short message
+            0x07,          // getVarValue opCode
+            myself.varId,  // var ID
+          ]);
+          myself.device.serialPort.drain();
+        }
       },
       1000
     );
@@ -93,28 +96,23 @@ class MicroBlocksDevice extends Device {
 
   notifyPropertyChanged(property, clientOnly) {
     super.notifyPropertyChanged(property);
-    if (!clientOnly) {
-      //TODO we need to request var IDs at some point
-      /*
+    if (!clientOnly && property.varId) {
       this.serialPort.write(
         this.adapter.packSetVariableMessage(
-          variable.id,
+          property.varId,
           property.value,
-          variable.type));
+          property.varType));
       this.serialPort.drain();
-      */
+      setInterval(function () {
+        property.requestingChange = false;
+      }, 1000);
     }
   }
 
   findPropertyById(varId) {
-    return this.properties.find(function(property) {
-      return property.id === varId;
-    });
-  }
-
-  findPropertyByName(varName) {
-    return this.properties.find(function(property) {
-      return property.varName === varName;
+    const myself = this;
+    return [...this.properties.values()].find(function(property) {
+      return property.varId === varId;
     });
   }
 }
@@ -149,9 +147,16 @@ class MicroBlocksAdapter extends Adapter {
     if (!this.devices.has(description.id)) {
       console.log('adding new thing named', description.title);
       const device = new MicroBlocksDevice(this, description, serialPort);
-      this.devices.set(device.id, device);
+      this.devices.set(description.id, device);
       console.log('id is', device.id);
       this.handleDeviceAdded(device);
+      // Request variable IDs associated with device properties
+      serialPort.write([
+        0xFA,       // short message
+        0x09,       // getVarNames opCode
+        0x00,       // object ID (irrelevant)
+      ]);
+      serialPort.drain();
       return device;
     } else {
       console.log('found existing thing named', description.title);
@@ -287,6 +292,7 @@ class MicroBlocksAdapter extends Adapter {
         if (opCode === 0x1D) {
           // variableName message is complete
           this.processVariableName(
+            serialPort,
             objectId,
             this.getPayload(serialPort.buffer, dataSize)
           );
@@ -399,7 +405,7 @@ class MicroBlocksAdapter extends Adapter {
    * @param {varValue} MicroBlocks variable content, properly typed
    * @param {varType} MicroBlocks variable type string (boolean, int, string)
    */
-  processVariableValue(serialPort, objectId, varValue, type) {
+  processVariableValue(serialPort, objectId, varValue, varType) {
     if (objectId === 0xFF) {
       // we found a new thing!
       let description = varValue;
@@ -422,8 +428,10 @@ class MicroBlocksAdapter extends Adapter {
     } else {
       const device = this.deviceAtPort(serialPort);
       if (device) {
-      const property = device.findPropertyById(objectId);
+        const property = device.findPropertyById(objectId);
         if (property) {
+          // update type
+          property.varType = varType;
           // second parameter asks to not notify this update back to µBlocks
           if (!property.requestingChange) {
             property.setValue(varValue, true);
@@ -431,6 +439,34 @@ class MicroBlocksAdapter extends Adapter {
             property.requestingChange = false;
           }
         }
+      }
+    }
+  }
+
+    /**
+   * Process and store variable ids into corresponding properties, and ask for
+   * their content too.
+   *
+   * @param {serialPort} port through which we got the message
+   * @param {objectId} MicroBlocks variable id
+   * @param {varName} MicroBlocks variable name
+   */
+  processVariableName(serialPort, objectId, varName) {
+    const device = this.deviceAtPort(serialPort);
+    if (device) {
+      const property = device.properties.get(varName);
+      if (property) {
+        console.log(
+          'Got id', objectId, 'for property', varName,
+          'of device', device.name);
+        property.varId = objectId;
+        // let's ask for the property value
+        serialPort.write([
+          0xFA,       // short message
+          0x07,       // getVarValue opCode
+          objectId,   // var ID
+        ]);
+        serialPort.drain();
       }
     }
   }
