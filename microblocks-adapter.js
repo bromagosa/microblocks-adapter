@@ -28,6 +28,8 @@ class MicroBlocksProperty extends Property {
     this.title = description.title;
     this.name = description.varName;
     this.varName = description.varName;
+    this.varId = null;
+    this.varType = null;
     this.setCachedValue(description.value);
     this.requestingChange = false;
     this.device.notifyPropertyChanged(this);
@@ -45,6 +47,25 @@ class MicroBlocksProperty extends Property {
       },
       1000
     );
+  }
+
+  setValue(value) {
+    return new Promise((resolve, reject) => {
+      super.setValue(value).then((updatedValue) => {
+        this.device.serialPort.write(
+          this.device.adapter.packSetVariableMessage(
+            this.varId,
+            updatedValue,
+            this.varType
+          )
+        );
+        this.device.serialPort.drain();
+        resolve(updatedValue);
+        this.device.notifyPropertyChanged(this);
+      }).catch((err) => {
+        reject(err);
+      });
+    });
   }
 }
 
@@ -398,10 +419,11 @@ class MicroBlocksAdapter extends Adapter {
         const property = device.findPropertyById(objectId);
         if (property) {
           // update type
-          property.varType = varType;
-          // second parameter asks to not notify this update back to µBlocks
+          if (!property.varType) {
+            console.log('Setting var type to', varType, 'for', property.title);
+            property.varType = varType;
+          }
           if (property.value !== varValue) {
-            console.log(property.title, 'is now', varValue);
             property.setCachedValue(varValue);
             device.notifyPropertyChanged(property);
           }
