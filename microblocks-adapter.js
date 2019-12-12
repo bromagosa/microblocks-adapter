@@ -83,6 +83,7 @@ class MicroBlocksDevice extends Device {
 
     Object.keys(thingDescription.properties).forEach(function(varName) {
       let description = thingDescription.properties[varName];
+      console.log('Adding property', description.title);
       description.varName = varName;
       myself.properties.set(
         varName,
@@ -92,7 +93,8 @@ class MicroBlocksDevice extends Device {
     if (thingDescription.events) {
       Object.keys(thingDescription.events).forEach(function(eventName) {
         let description = thingDescription.events[eventName];
-        myself.addEvent(description.name, description.metadata);
+        console.log('Registering event', eventName);
+        myself.addEvent(eventName, description);
       });
     }
   }
@@ -133,10 +135,9 @@ class MicroBlocksAdapter extends Adapter {
     shasum.update(description.title);
     description.id = `microblocks-${shasum.digest('hex')}`;
     if (!this.devices.has(description.id)) {
-      console.log('adding new thing named', description.title);
       const device = new MicroBlocksDevice(this, description, serialPort);
       this.devices.set(description.id, device);
-      console.log('id is', device.id);
+      console.log('Adding thing "', description.title, '" with id', device.id);
       this.handleDeviceAdded(device);
       // Request variable IDs associated with device properties
       serialPort.write([
@@ -147,7 +148,7 @@ class MicroBlocksAdapter extends Adapter {
       serialPort.drain();
       return device;
     } else {
-      console.log('found existing thing named', description.title);
+      console.log('Found existing thing named', description.title);
     }
   }
 
@@ -212,7 +213,7 @@ class MicroBlocksAdapter extends Adapter {
       });
 
       serialPort.on('open', function() {
-        console.log(`probing ${port.comName}`);
+        console.log(`Probing ${port.comName}`);
         // We ask the board to give us the value of the '_thing description'
         // variable
         serialPort.write([0xFA, 0x00, 0x05]);
@@ -377,7 +378,7 @@ class MicroBlocksAdapter extends Adapter {
   discoveredDevice(serialPort) {
     if (serialPort.discoveryTimeout) {
       console.log(
-        'found MicroBlocks device at',
+        'Found MicroBlocks device at',
         serialPort.path);
       clearTimeout(serialPort.discoveryTimeout);
       serialPort.discoveryTimeout = null;
@@ -470,7 +471,7 @@ class MicroBlocksAdapter extends Adapter {
     if (device) {
       const eventDescription = device.events.get(message);
       if (eventDescription) {
-        console.log('got event', message);
+        console.log('Received event', message);
         device.eventNotify(new Event(device, message));
       }
     }
