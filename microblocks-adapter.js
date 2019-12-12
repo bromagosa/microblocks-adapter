@@ -25,7 +25,8 @@ class MicroBlocksProperty extends Property {
     super(device, description.varName, description);
     const myself = this;
     this.unit = description.unit;
-    this.name = description.title;
+    this.title = description.title;
+    this.name = description.varName;
     this.varName = description.varName;
     this.setCachedValue(description.value);
     this.requestingChange = false;
@@ -45,37 +46,18 @@ class MicroBlocksProperty extends Property {
       1000
     );
   }
-
-  /**
-   * @method setValue
-   * @returns a promise which resolves to the updated value.
-   *
-   * @note it is possible that the updated value doesn't match
-   * the value passed in.
-   */
-  setValue(value, clientOnly) {
-    if (!clientOnly) {
-      this.requestingChange = true;
-    }
-    return new Promise((resolve, reject) => {
-      super.setValue(value).then((updatedValue) => {
-        resolve(updatedValue);
-        this.device.notifyPropertyChanged(this, clientOnly);
-      }).catch((err) => {
-        reject(err);
-      });
-    });
-  }
 }
 
 class MicroBlocksDevice extends Device {
   constructor(adapter, thingDescription, serialPort) {
     super(adapter, thingDescription.id, serialPort);
-
     const myself = this;
-    this.name = thingDescription.title;
+    this.title = this.name = thingDescription.title || thingDescription.name;
+    this.type = thingDescription.type;
+    this['@context'] =
+      thingDescription['@context'] || 'https://iot.mozilla.org/schemas';
+    this['@type'] = thingDescription['@type'] || [];
     this.id = thingDescription.id;
-    this['@type'] = thingDescription['@type'] || 'thing';
     this.serialPort = serialPort;
 
     Object.keys(thingDescription.properties).forEach(function(varName) {
@@ -91,21 +73,6 @@ class MicroBlocksDevice extends Device {
         let description = thingDescription.events[eventName];
         myself.addEvent(description.name, description.metadata);
       });
-    }
-  }
-
-  notifyPropertyChanged(property, clientOnly) {
-    super.notifyPropertyChanged(property);
-    if (!clientOnly && property.varId) {
-      this.serialPort.write(
-        this.adapter.packSetVariableMessage(
-          property.varId,
-          property.value,
-          property.varType));
-      this.serialPort.drain();
-      setInterval(function () {
-        property.requestingChange = false;
-      }, 1000);
     }
   }
 
@@ -433,10 +400,10 @@ class MicroBlocksAdapter extends Adapter {
           // update type
           property.varType = varType;
           // second parameter asks to not notify this update back to µBlocks
-          if (!property.requestingChange) {
-            property.setValue(varValue, true);
-          } else {
-            property.requestingChange = false;
+          if (property.value !== varValue) {
+            console.log(property.title, 'is now', varValue);
+            property.setCachedValue(varValue);
+            device.notifyPropertyChanged(property);
           }
         }
       }
