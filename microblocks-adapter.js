@@ -22,7 +22,7 @@ const {
 
 class MicroBlocksProperty extends Property {
   constructor(device, description) {
-    super(device, description.name, description);
+    super(device, description.varName, description);
     const myself = this;
     this.unit = description.unit;
     this.name = description.title;
