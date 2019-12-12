@@ -94,7 +94,7 @@ class MicroBlocksDevice extends Device {
   notifyPropertyChanged(property, clientOnly) {
     super.notifyPropertyChanged(property);
     if (!clientOnly) {
-      //TODO update variable given its name, or request var IDs at some point
+      //TODO we need to request var IDs at some point
       /*
       this.serialPort.write(
         this.adapter.packSetVariableMessage(
@@ -106,7 +106,13 @@ class MicroBlocksDevice extends Device {
     }
   }
 
-  findVar(varName) {
+  findPropertyById(varId) {
+    return this.properties.find(function(property) {
+      return property.id === varId;
+    });
+  }
+
+  findPropertyByName(varName) {
     return this.properties.find(function(property) {
       return property.varName === varName;
     });
@@ -194,9 +200,8 @@ class MicroBlocksAdapter extends Adapter {
   }
 
   /**
-   * Test this port to see if there's a µBlocks device in it. If so, we store
-   * everything into a mock thing instance until the whole definition is
-   * complete, and only then we create a new MicroBlocksDevice.
+   * Test this port to see if there's a µBlocks device in it. If so, we create
+   * a new thing with the description sent back by the device.
    *
    * @param {port} serial port object to probe.
    */
@@ -249,7 +254,6 @@ class MicroBlocksAdapter extends Adapter {
         if (err && err.disconnected) {
           console.log('removing device at', port.comName,
                       'because it was unplugged');
-          //TODO find device connected to this port, instead of using its id
           const device = this.deviceAtPort(serialPort);
           if (!device) {
             console.warn('Unable to remove device at', port.comName);
@@ -267,9 +271,9 @@ class MicroBlocksAdapter extends Adapter {
    * Process the current serial port buffer to see if there's a complete
    * message to be parsed, and parse it if so.
    *
-   * @param {mockThing} mock thing object where we store all properties.
+   * @param {serialPort} the port through which this data is coming.
    */
-  processData(serialPort, mockThing) {
+  processData(serialPort) {
     const check = serialPort.buffer[0];
     const opCode = serialPort.buffer[1];
     const objectId = serialPort.buffer[2];
@@ -297,7 +301,7 @@ class MicroBlocksAdapter extends Adapter {
         } else if (opCode === 0x1B) {
           // broadcast opCode
           this.processBroadcast(
-            mockThing,
+            serialPort,
             this.getPayload(serialPort.buffer, dataSize)
           );
         } else if (opCode === 0x14) {
@@ -374,7 +378,7 @@ class MicroBlocksAdapter extends Adapter {
    * Called when a MicroBlocks device has been discovered. We clear the
    * serial port discovery timeout.
    *
-   * @param {mockThing} mock thing object where we store all properties.
+   * @param {serialPort} port where the device has been discovered.
    */
   discoveredDevice(serialPort) {
     if (serialPort.discoveryTimeout) {
@@ -387,14 +391,11 @@ class MicroBlocksAdapter extends Adapter {
   }
 
   /**
-   * Process and store variable values into the mock thing. If the variable
-   * contains the thing's name or capability, we store those into the mock
-   * device. Once we have both, our thing is defined and we can ask the board
-   * to restart all its scripts so that we can intercept the property
-   * description broadcasts.
+   * Process variable values. If the variable contains a thing description,
+   * we create a new device. Otherwise, we update the property value.
    *
-   * @param {mockThing} mock thing object where we store all properties.
-   * @param {objectId} MicroBlocks variable id
+   * @param {serialPort} port through which we got the message
+   * @param {objectId} MicroBlocks message id (or variable id)
    * @param {varValue} MicroBlocks variable content, properly typed
    * @param {varType} MicroBlocks variable type string (boolean, int, string)
    */
@@ -419,36 +420,28 @@ class MicroBlocksAdapter extends Adapter {
         console.log(varValue);
       }
     } else {
-      // TODO get device associated with serial port and deal with its vars
-      /*
-      const variable = mockThing.variables[objectId];
-      if (variable) {
-        variable.value = varValue;
-        variable.type = type;
-        if (variable.property) {
+      const device = this.deviceAtPort(serialPort);
+      if (device) {
+      const property = device.findPropertyById(objectId);
+        if (property) {
           // second parameter asks to not notify this update back to µBlocks
-          if (!variable.property.requestingChange) {
-            variable.property.setValue(varValue, true);
+          if (!property.requestingChange) {
+            property.setValue(varValue, true);
           } else {
-            variable.property.requestingChange = false;
+            property.requestingChange = false;
           }
         }
       }
-      */
     }
   }
 
   /**
-   * Process a broadcast message coming from the board. If it describes a
-   * thing property, we parse it and add it to our mock thing's property
-   * list.
-   *
-   * @param {mockThing} mock thing object where we store all properties.
+   * Process a broadcast message coming from the board describing an event.
+   * @param {serialPort} port through which we got the message
    * @param {message} MicroBlocks message content, as a string
    */
   processBroadcast(serialPort, message) {
-    // TODO get device associated to serial port
-    const device = this.getDevice(mockThing.id);
+    const device = this.deviceAtPort(serialPort);
     if (device) {
       const eventDescription = device.events.get(message);
       if (eventDescription) {
@@ -458,7 +451,9 @@ class MicroBlocksAdapter extends Adapter {
     }
   }
 
-  processRadioPacket(mockThing, packet) {
+  processRadioPacket(serialPort, packet) {
+    //TODO redo by sending whole JSON description from Radio thing
+    //     and just calling addDevice
     if (!packet[0] === 31) { return; }
     let index = packet[1]
     let strLength = packet[2]
@@ -480,25 +475,14 @@ class MicroBlocksAdapter extends Adapter {
         console.log('Got radio string:', string);
         this.radioPackets[crc] = null;
         if (string.indexOf('moz-thing') === 0) {
-          const newThing = {
-            buffer: [],
-            variables: [],
-            isRadio: true,
-            serialPort: mockThing.serialPort,
-            properties: [],
-            events: [],
-          };
-          this.processBroadcast(newThing, string);
+          //TODO create a new radio thing
         } else {
-          // how to make sure this mockThing is the previously created newThing?
-          this.processBroadcast(mockThing, string);
+          //TODO parse other messages
         }
       } else {
         // Ask the bridge to ask the board to resend
         // TODO The bridge doesn't yet listen for these messages
-        mockThing.serialPort.write(
-          this.packBroadcastMessage('moz-resend:' + crc)
-        );
+        serialPort.write(this.packBroadcastMessage('moz-resend:' + crc));
       }
     }
   }
