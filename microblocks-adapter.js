@@ -70,7 +70,7 @@ class MicroBlocksProperty extends Property {
 }
 
 class MicroBlocksDevice extends Device {
-  constructor(adapter, thingDescription, serialPort) {
+  constructor(adapter, thingDescription, serialPort, isRadio) {
     super(adapter, thingDescription.id, serialPort);
     const myself = this;
     this.title = this.name = thingDescription.title || thingDescription.name;
@@ -80,6 +80,7 @@ class MicroBlocksDevice extends Device {
     this['@type'] = thingDescription['@type'] || [];
     this.id = thingDescription.id;
     this.serialPort = serialPort;
+    this.isRadio = (isRadio === true);
 
     Object.keys(thingDescription.properties).forEach(function(varName) {
       let description = thingDescription.properties[varName];
@@ -130,12 +131,13 @@ class MicroBlocksAdapter extends Adapter {
     });
   }
 
-  addDevice(serialPort, description) {
+  addDevice(serialPort, description, isRadio) {
     const shasum = crypto.createHash('sha1');
     shasum.update(description.title);
     description.id = `microblocks-${shasum.digest('hex')}`;
     if (!this.devices.has(description.id)) {
-      const device = new MicroBlocksDevice(this, description, serialPort);
+      const device =
+            new MicroBlocksDevice(this, description, serialPort, isRadio);
       this.devices.set(description.id, device);
       console.log('Adding thing "', description.title, '" with id', device.id);
       this.handleDeviceAdded(device);
@@ -237,7 +239,7 @@ class MicroBlocksAdapter extends Adapter {
           serialPort.close();
           clearTimeout(this);
           serialPort.discoveryTimeout = null;
-        }, 5000);
+        }, 3000);
       });
 
       serialPort.on('error', (err) => {
@@ -498,7 +500,6 @@ class MicroBlocksAdapter extends Adapter {
       }
     }
     let string = String.fromCharCode.apply(null, this.radioPackets[crc]);
-    console.log(string);
     if (string.length === strLength) {
       // We got the last packet. Let's make sure CRCs match
       let computedCRC =
@@ -506,9 +507,10 @@ class MicroBlocksAdapter extends Adapter {
             return acc + (current * (i + 1));
         }, strLength) % 255;
       if (computedCRC === crc) {
-        console.log('Got radio string:', string);
         this.radioPackets[crc] = null;
         if (string.startsWith('{ "title": "')) {
+          console.log('Got a radio thing!');
+          this.addDevice(serialPort, JSON.parse(string), true); // radio thing
           //TODO create a new radio thing
         } else {
           //TODO parse other messages
@@ -516,7 +518,7 @@ class MicroBlocksAdapter extends Adapter {
       } else {
         // Ask the bridge to ask the board to resend
         // TODO The bridge doesn't yet listen for these messages
-        serialPort.write(this.packBroadcastMessage('moz-resend:' + crc));
+        serialPort.write(this.packBroadcastMessage('moz-resend' + crc));
       }
     }
   }
@@ -528,9 +530,9 @@ class MicroBlocksAdapter extends Adapter {
    * @param {message} MicroBlocks broadcast message content
    * @return {Array} An array of bytes ready to be sent to the board.
    */
-  packBroadcastMessage(message) {
+  packBroadcastMessage(contents) {
     let message = [0xFB, 0x1B];
-    const data = this.packValue(message, 2).concat(0xFE); // 2 is string type
+    const data = this.packValue(contents, 2).concat(0xFE); // 2 is string type
     // add the data size in little endian
     message.push(data.length & 255);
     message.push((data.length >> 8) & 255);
