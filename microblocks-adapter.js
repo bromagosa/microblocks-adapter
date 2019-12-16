@@ -216,7 +216,7 @@ class MicroBlocksAdapter extends Adapter {
         console.log(`Probing ${port.comName}`);
         // We ask the board to give us the value of the '_thing description'
         // variable
-        serialPort.write([0xFA, 0x00, 0x05]);
+        serialPort.write([0xFA, 0x05, 0x00]); // startAll
         serialPort.drain();
         let message = [
           0xFB,       // long message
@@ -237,7 +237,7 @@ class MicroBlocksAdapter extends Adapter {
           serialPort.close();
           clearTimeout(this);
           serialPort.discoveryTimeout = null;
-        }, 1000);
+        }, 5000);
       });
 
       serialPort.on('error', (err) => {
@@ -274,7 +274,6 @@ class MicroBlocksAdapter extends Adapter {
     const dataSize = serialPort.buffer[3] | serialPort.buffer[4] << 8;
 
     if (check === 0xFB) {
-      this.discoveredDevice(serialPort);
       // long message
       if (serialPort.buffer.length >= dataSize + 5) {
         // message is complete
@@ -398,6 +397,7 @@ class MicroBlocksAdapter extends Adapter {
     if (objectId === 0xFF) {
       // we found a new thing!
       let description = varValue;
+      this.discoveredDevice(serialPort);
       try {
         // fix incomplete thing descriptions
 	if (description.endsWith(',')) {
@@ -474,6 +474,13 @@ class MicroBlocksAdapter extends Adapter {
         console.log('Received event', message);
         device.eventNotify(new Event(device, message));
       }
+    } else if (message.startsWith('moz-packet')) {
+      this.processRadioPacket(
+        serialPort,
+        message.substring(10).split(',').map(     // Turn string back into
+          (s) => { return parseInt(s); }          // charCode array
+        )
+      );
     }
   }
 
@@ -491,6 +498,7 @@ class MicroBlocksAdapter extends Adapter {
       }
     }
     let string = String.fromCharCode.apply(null, this.radioPackets[crc]);
+    console.log(string);
     if (string.length === strLength) {
       // We got the last packet. Let's make sure CRCs match
       let computedCRC =
@@ -500,7 +508,7 @@ class MicroBlocksAdapter extends Adapter {
       if (computedCRC === crc) {
         console.log('Got radio string:', string);
         this.radioPackets[crc] = null;
-        if (string.indexOf('moz-thing') === 0) {
+        if (string.startsWith('{ "title": "')) {
           //TODO create a new radio thing
         } else {
           //TODO parse other messages
