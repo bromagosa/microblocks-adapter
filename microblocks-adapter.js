@@ -165,7 +165,7 @@ class MicroBlocksAdapter extends Adapter {
     return [...this.devices.values()].find(
       function (device) {
           return (device.serialPort === serialPort) &&
-              (device.radioDeviceID === radioDeviceID);
+              (device.radioDeviceID === (radioDeviceID || null));
       }
     );
   }
