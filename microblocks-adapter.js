@@ -80,7 +80,7 @@ class MicroBlocksDevice extends Device {
     this['@type'] = thingDescription['@type'] || [];
     this.id = thingDescription.id;
     this.serialPort = serialPort;
-    this.radioDeviceID = radioDeviceID;
+    this.radioDeviceID = radioDeviceID || null;
 
     Object.keys(thingDescription.properties).forEach(function(varName) {
       let description = thingDescription.properties[varName];
@@ -484,11 +484,12 @@ class MicroBlocksAdapter extends Adapter {
     if (device) {
       const contents =
             isRadioPacket ? this.extractRadioString(message) : message;
-      console.log(contents);
       const eventDescription = device.events.get(contents);
       if (eventDescription) {
         console.log('Received event', contents);
         device.eventNotify(new Event(device, contents));
+      } else {
+        console.log('Unrecognized broadcast from device:\n', contents);
       }
     } else if (isRadioPacket) {
       // Turn string back into charCode array
