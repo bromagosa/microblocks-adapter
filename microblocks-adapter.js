@@ -28,7 +28,7 @@ class MicroBlocksProperty extends Property {
     this.title = description.title;
     this.name = description.varName;
     this.varName = description.varName;
-    this.varId = null;
+    this.varID = null;
     this.varType = null;
     this.setCachedValue(description.value);
     this.requestingChange = false;
@@ -36,11 +36,11 @@ class MicroBlocksProperty extends Property {
 
     this.poller = setInterval(
       function() {
-        if (myself.varId && !myself.requestingChange) {
+        if (myself.varID && !myself.requestingChange) {
           myself.device.serialPort.write([
             0xFA,          // short message
             0x07,          // getVarValue opCode
-            myself.varId,  // var ID
+            myself.varID,  // var ID
           ]);
           myself.device.serialPort.drain();
         }
@@ -54,7 +54,7 @@ class MicroBlocksProperty extends Property {
       super.setValue(value).then((updatedValue) => {
         this.device.serialPort.write(
           this.device.adapter.packSetVariableMessage(
-            this.varId,
+            this.varID,
             updatedValue,
             this.varType
           )
@@ -70,7 +70,7 @@ class MicroBlocksProperty extends Property {
 }
 
 class MicroBlocksDevice extends Device {
-  constructor(adapter, thingDescription, serialPort, isRadio) {
+  constructor(adapter, thingDescription, serialPort, radioDeviceID) {
     super(adapter, thingDescription.id, serialPort);
     const myself = this;
     this.title = this.name = thingDescription.title || thingDescription.name;
@@ -80,7 +80,7 @@ class MicroBlocksDevice extends Device {
     this['@type'] = thingDescription['@type'] || [];
     this.id = thingDescription.id;
     this.serialPort = serialPort;
-    this.isRadio = (isRadio === true);
+    this.radioDeviceID = radioDeviceID;
 
     Object.keys(thingDescription.properties).forEach(function(varName) {
       let description = thingDescription.properties[varName];
@@ -100,10 +100,10 @@ class MicroBlocksDevice extends Device {
     }
   }
 
-  findPropertyById(varId) {
+  findPropertyByID(varID) {
     const myself = this;
     return [...this.properties.values()].find(function(property) {
-      return property.varId === varId;
+      return property.varID === varID;
     });
   }
 }
@@ -131,22 +131,29 @@ class MicroBlocksAdapter extends Adapter {
     });
   }
 
-  addDevice(serialPort, description, isRadio) {
+  addDevice(serialPort, description, radioDeviceID) {
+    this.discoveredDevice(serialPort);
     const shasum = crypto.createHash('sha1');
     shasum.update(description.title);
     description.id = `microblocks-${shasum.digest('hex')}`;
     if (!this.devices.has(description.id)) {
       const device =
-            new MicroBlocksDevice(this, description, serialPort, isRadio);
+        new MicroBlocksDevice(this, description, serialPort, radioDeviceID);
       this.devices.set(description.id, device);
       console.log('Adding thing "', description.title, '" with id', device.id);
       this.handleDeviceAdded(device);
       // Request variable IDs associated with device properties
-      serialPort.write([
-        0xFA,       // short message
-        0x09,       // getVarNames opCode
-        0x00,       // object ID (irrelevant)
-      ]);
+      if (radioDeviceID) {
+        serialPort.write(
+          this.packBroadcastMessage('moz-get-vars' + radioDeviceID)
+        );
+      } else {
+        serialPort.write([
+          0xFA,       // short message
+          0x09,       // getVarNames opCode
+          0x00,       // object ID (irrelevant)
+        ]);
+      }
       serialPort.drain();
       return device;
     } else {
@@ -154,9 +161,12 @@ class MicroBlocksAdapter extends Adapter {
     }
   }
 
-  deviceAtPort(serialPort) {
+  deviceAtPort(serialPort, radioDeviceID) {
     return [...this.devices.values()].find(
-      function (device) { return device.serialPort === serialPort; }
+      function (device) {
+          return (device.serialPort === serialPort) &&
+              (device.radioDeviceID === radioDeviceID);
+      }
     );
   }
 
@@ -169,8 +179,8 @@ class MicroBlocksAdapter extends Adapter {
    */
   clearState() {
     this.actions = {};
-    for (const deviceId in this.devices) {
-      this.removeThing(this.devices[deviceId]);
+    for (const deviceID in this.devices) {
+      this.removeThing(this.devices[deviceID]);
     }
   }
 
@@ -272,7 +282,7 @@ class MicroBlocksAdapter extends Adapter {
   processData(serialPort) {
     const check = serialPort.buffer[0];
     const opCode = serialPort.buffer[1];
-    const objectId = serialPort.buffer[2];
+    const objectID = serialPort.buffer[2];
     const dataSize = serialPort.buffer[3] | serialPort.buffer[4] << 8;
 
     if (check === 0xFB) {
@@ -283,14 +293,14 @@ class MicroBlocksAdapter extends Adapter {
           // variableName message is complete
           this.processVariableName(
             serialPort,
-            objectId,
+            objectID,
             this.getPayload(serialPort.buffer, dataSize)
           );
         } else if (opCode === 0x15) {
           // variableValue opCode
           this.processVariableValue(
             serialPort,
-            objectId,
+            objectID,
             this.getPayload(serialPort.buffer, dataSize),
             this.getPayloadType(serialPort.buffer)
           );
@@ -391,15 +401,14 @@ class MicroBlocksAdapter extends Adapter {
    * we create a new device. Otherwise, we update the property value.
    *
    * @param {serialPort} port through which we got the message
-   * @param {objectId} MicroBlocks message id (or variable id)
+   * @param {objectID} MicroBlocks message id (or variable id)
    * @param {varValue} MicroBlocks variable content, properly typed
    * @param {varType} MicroBlocks variable type string (boolean, int, string)
    */
-  processVariableValue(serialPort, objectId, varValue, varType) {
-    if (objectId === 0xFF) {
+  processVariableValue(serialPort, objectID, varValue, varType) {
+    if (objectID === 0xFF) {
       // we found a new thing!
       let description = varValue;
-      this.discoveredDevice(serialPort);
       try {
         // fix incomplete thing descriptions
 	if (description.endsWith(',')) {
@@ -419,7 +428,7 @@ class MicroBlocksAdapter extends Adapter {
     } else {
       const device = this.deviceAtPort(serialPort);
       if (device) {
-        const property = device.findPropertyById(objectId);
+        const property = device.findPropertyByID(objectID);
         if (property) {
           // update type
           if (!property.varType) {
@@ -440,23 +449,23 @@ class MicroBlocksAdapter extends Adapter {
    * their content too.
    *
    * @param {serialPort} port through which we got the message
-   * @param {objectId} MicroBlocks variable id
+   * @param {objectID} MicroBlocks variable id
    * @param {varName} MicroBlocks variable name
    */
-  processVariableName(serialPort, objectId, varName) {
+  processVariableName(serialPort, objectID, varName) {
     const device = this.deviceAtPort(serialPort);
     if (device) {
       const property = device.properties.get(varName);
       if (property) {
         console.log(
-          'Got id', objectId, 'for property', varName,
+          'Got id', objectID, 'for property', varName,
           'of device', device.name);
-        property.varId = objectId;
+        property.varID = objectID;
         // let's ask for the property value
         serialPort.write([
           0xFA,       // short message
           0x07,       // getVarValue opCode
-          objectId,   // var ID
+          objectID,   // var ID
         ]);
         serialPort.drain();
       }
@@ -469,30 +478,49 @@ class MicroBlocksAdapter extends Adapter {
    * @param {message} MicroBlocks message content, as a string
    */
   processBroadcast(serialPort, message) {
-    const device = this.deviceAtPort(serialPort);
+    const isRadioPacket = message.startsWith('moz-packet');
+    const radioDeviceID = isRadioPacket ? this.getRadioDeviceID(message) : null;
+    const device = this.deviceAtPort(serialPort, radioDeviceID);
     if (device) {
-      const eventDescription = device.events.get(message);
+      const contents =
+            isRadioPacket ? this.extractRadioString(message) : message;
+      console.log(contents);
+      const eventDescription = device.events.get(contents);
       if (eventDescription) {
-        console.log('Received event', message);
-        device.eventNotify(new Event(device, message));
+        console.log('Received event', contents);
+        device.eventNotify(new Event(device, contents));
       }
-    } else if (message.startsWith('moz-packet')) {
-      this.processRadioPacket(
-        serialPort,
-        message.substring(10).split(',').map(     // Turn string back into
-          (s) => { return parseInt(s); }          // charCode array
-        )
-      );
+    } else if (isRadioPacket) {
+      // Turn string back into charCode array
+      const byteArray =
+            message.substring(11 + radioDeviceID.length).split(',').map(
+              (s) => { return parseInt(s); }
+            );
+      this.processRadioPacket(serialPort, radioDeviceID, byteArray);
     }
   }
 
-  processRadioPacket(serialPort, packet) {
-    //TODO redo by sending whole JSON description from Radio thing
-    //     and just calling addDevice
+  getRadioDeviceID(message) {
+    return message.substring(10).split(':')[0];
+  }
+
+  extractRadioString(message) {
+    // Position is 10 (length of moz-packet) + 1 (: char) + length of device ID
+    // We then remove all zeroes (null terminators) plus the first 4 elements
+    // (protocol header)
+    const byteArray =
+          message.substring(
+            11 + this.getRadioDeviceID(message).length).
+            replace(/,0/g,'').split(',').slice(4);
+    return String.fromCharCode.apply(null, byteArray);
+  }
+
+  processRadioPacket(serialPort, radioDeviceID, packet) {
     if (!packet[0] === 31) { return; }
     let index = packet[1]
     let strLength = packet[2]
     let crc = packet[3];
+    const device = this.deviceAtPort(serialPort, radioDeviceID);
     if (!this.radioPackets[crc]) { this.radioPackets[crc] = []; }
     for (var i = 4; i < 32; i++) {
       if (packet[i] !== 0) {
@@ -510,10 +538,9 @@ class MicroBlocksAdapter extends Adapter {
         this.radioPackets[crc] = null;
         if (string.startsWith('{ "title": "')) {
           console.log('Got a radio thing!');
-          this.addDevice(serialPort, JSON.parse(string), true); // radio thing
-          //TODO create a new radio thing
+          this.addDevice(serialPort, JSON.parse(string), radioDeviceID);
         } else {
-          //TODO parse other messages
+          //TODO Parse other messages? There may be no others
         }
       } else {
         // Ask the bridge to ask the board to resend
@@ -545,12 +572,12 @@ class MicroBlocksAdapter extends Adapter {
    * Pack a "set variable value" MicroBlocks serial message, including the
    * variable id, type and value and ready to be sent via serial port.
    *
-   * @param {varId} MicroBlocks variable id
+   * @param {varID} MicroBlocks variable id
    * @param {value} MicroBlocks variable content
    * @return {Array} An array of bytes ready to be sent to the board.
    */
-  packSetVariableMessage(varId, value, type) {
-    let message = [0xFB, 0x08, varId];
+  packSetVariableMessage(varID, value, type) {
+    let message = [0xFB, 0x08, varID];
     const data = this.packValue(value, type).concat(0xFE);
     // add the data size in little endian
     message.push(data.length & 255);
