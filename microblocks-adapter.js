@@ -490,6 +490,7 @@ class MicroBlocksAdapter extends Adapter {
         device.eventNotify(new Event(device, contents));
       } else {
         console.log('Unrecognized broadcast from device:\n', contents);
+        console.log('message is', contents.length, 'chars long');
       }
     } else if (isRadioPacket) {
       // Turn string back into charCode array
@@ -519,7 +520,7 @@ class MicroBlocksAdapter extends Adapter {
   processRadioPacket(serialPort, radioDeviceID, packet) {
     if (!packet[0] === 31) { return; }
     let index = packet[1]
-    let strLength = packet[2]
+    let packetCount = packet[2]
     let crc = packet[3];
     const device = this.deviceAtPort(serialPort, radioDeviceID);
     if (!this.radioPackets[crc]) { this.radioPackets[crc] = []; }
@@ -529,23 +530,27 @@ class MicroBlocksAdapter extends Adapter {
       }
     }
     let string = String.fromCharCode.apply(null, this.radioPackets[crc]);
-    if (string.length === strLength) {
+    let receivedPackets = Math.floor(string.length / 28);
+    if ((string.length % 28) > 0) { receivedPackets += 1 };
+    if (receivedPackets === packetCount) {
       // We got the last packet. Let's make sure CRCs match
       let computedCRC =
         this.radioPackets[crc].reduce((acc, current, i) => {
             return acc + (current * (i + 1));
-        }, strLength) % 255;
+        }, string.length) % 255;
       if (computedCRC === crc) {
         this.radioPackets[crc] = null;
         if (string.startsWith('{ "title": "')) {
           console.log('Got a radio thing!');
           this.addDevice(serialPort, JSON.parse(string), radioDeviceID);
         } else {
+          console.log('Got a random radio string\n', string);
           //TODO Parse other messages? There may be no others
         }
       } else {
         // Ask the bridge to ask the board to resend
         // TODO The bridge doesn't yet listen for these messages
+        console.log('Got a corrupt radio string\n', string);
         serialPort.write(this.packBroadcastMessage('moz-resend' + crc));
       }
     }
