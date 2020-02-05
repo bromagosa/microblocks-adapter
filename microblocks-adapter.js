@@ -83,7 +83,7 @@ class MicroBlocksDevice extends Device {
     this.radioDeviceID = radioDeviceID || null;
 
     Object.keys(thingDescription.properties).forEach(function(varName) {
-      let description = thingDescription.properties[varName];
+      const description = thingDescription.properties[varName];
       console.log('Adding property', description.title);
       description.varName = varName;
       myself.properties.set(
@@ -93,7 +93,7 @@ class MicroBlocksDevice extends Device {
     });
     if (thingDescription.events) {
       Object.keys(thingDescription.events).forEach(function(eventName) {
-        let description = thingDescription.events[eventName];
+        const description = thingDescription.events[eventName];
         console.log('Registering event', eventName);
         myself.addEvent(eventName, description);
       });
@@ -101,7 +101,6 @@ class MicroBlocksDevice extends Device {
   }
 
   findPropertyByID(varID) {
-    const myself = this;
     return [...this.properties.values()].find(function(property) {
       return property.varID === varID;
     });
@@ -145,7 +144,7 @@ class MicroBlocksAdapter extends Adapter {
       // Request variable IDs associated with device properties
       if (radioDeviceID) {
         serialPort.write(
-          this.packBroadcastMessage('moz-get-vars' + radioDeviceID)
+          this.packBroadcastMessage(`moz-get-vars${radioDeviceID}`)
         );
       } else {
         serialPort.write([
@@ -163,8 +162,8 @@ class MicroBlocksAdapter extends Adapter {
 
   deviceAtPort(serialPort, radioDeviceID) {
     return [...this.devices.values()].find(
-      function (device) {
-          return (device.serialPort === serialPort) &&
+      function(device) {
+        return (device.serialPort === serialPort) &&
               (device.radioDeviceID === (radioDeviceID || null));
       }
     );
@@ -315,7 +314,7 @@ class MicroBlocksAdapter extends Adapter {
           console.log(
             'device says:',
             this.getPayload(serialPort.buffer, dataSize));
-        } 
+        }
         serialPort.buffer = serialPort.buffer.slice(5 + dataSize);
         // there may be the start of a new message left to process
         this.processData(serialPort);
@@ -411,12 +410,12 @@ class MicroBlocksAdapter extends Adapter {
       let description = varValue;
       try {
         // fix incomplete thing descriptions
-	if (description.endsWith(',')) {
+        if (description.endsWith(',')) {
           // close last property / event
-          description = description.slice(0, -1) + '}}';
+          description = `${description.slice(0, -1)}}}`;
         } else if (description.endsWith('{')) {
           // no properties
-          description = description + '}}';
+          description = `${description}}}`;
         }
         this.addDevice(serialPort, JSON.parse(description));
         console.log('Thing description at', serialPort.path, 'complete');
@@ -444,7 +443,7 @@ class MicroBlocksAdapter extends Adapter {
     }
   }
 
-    /**
+  /**
    * Process and store variable ids into corresponding properties, and ask for
    * their content too.
    *
@@ -496,7 +495,9 @@ class MicroBlocksAdapter extends Adapter {
       // Turn string back into charCode array
       const byteArray =
             message.substring(11 + radioDeviceID.length).split(',').map(
-              (s) => { return parseInt(s); }
+              (s) => {
+                return parseInt(s);
+              }
             );
       this.processRadioPacket(serialPort, radioDeviceID, byteArray);
     }
@@ -513,30 +514,35 @@ class MicroBlocksAdapter extends Adapter {
     const byteArray =
           message.substring(
             11 + this.getRadioDeviceID(message).length).
-            replace(/,0/g,'').split(',').slice(4);
+            replace(/,0/g, '').split(',').slice(4);
     return String.fromCharCode.apply(null, byteArray);
   }
 
   processRadioPacket(serialPort, radioDeviceID, packet) {
-    if (!packet[0] === 31) { return; }
-    let index = packet[1]
-    let packetCount = packet[2]
-    let crc = packet[3];
-    const device = this.deviceAtPort(serialPort, radioDeviceID);
-    if (!this.radioPackets[crc]) { this.radioPackets[crc] = []; }
-    for (var i = 4; i < 32; i++) {
+    if (!packet[0] === 31) {
+      return;
+    }
+    const index = packet[1];
+    const packetCount = packet[2];
+    const crc = packet[3];
+    if (!this.radioPackets[crc]) {
+      this.radioPackets[crc] = [];
+    }
+    for (let i = 4; i < 32; i++) {
       if (packet[i] !== 0) {
         this.radioPackets[crc][((index - 1) * 28) + i - 4] = packet[i];
       }
     }
-    let string = String.fromCharCode.apply(null, this.radioPackets[crc]);
+    const string = String.fromCharCode.apply(null, this.radioPackets[crc]);
     let receivedPackets = Math.floor(string.length / 28);
-    if ((string.length % 28) > 0) { receivedPackets += 1 };
+    if ((string.length % 28) > 0) {
+      receivedPackets += 1;
+    }
     if (receivedPackets === packetCount) {
       // We got the last packet. Let's make sure CRCs match
-      let computedCRC =
+      const computedCRC =
         this.radioPackets[crc].reduce((acc, current, i) => {
-            return acc + (current * (i + 1));
+          return acc + (current * (i + 1));
         }, string.length) % 255;
       if (computedCRC === crc) {
         this.radioPackets[crc] = null;
@@ -545,13 +551,13 @@ class MicroBlocksAdapter extends Adapter {
           this.addDevice(serialPort, JSON.parse(string), radioDeviceID);
         } else {
           console.log('Got a random radio string\n', string);
-          //TODO Parse other messages? There may be no others
+          // TODO Parse other messages? There may be no others
         }
       } else {
         // Ask the bridge to ask the board to resend
         // TODO The bridge doesn't yet listen for these messages
         console.log('Got a corrupt radio string\n', string);
-        serialPort.write(this.packBroadcastMessage('moz-resend' + crc));
+        serialPort.write(this.packBroadcastMessage(`moz-resend${crc}`));
       }
     }
   }
