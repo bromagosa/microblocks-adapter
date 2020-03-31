@@ -2,7 +2,7 @@
   "name": "microblocks-adapter",
   "display_name": "MicroBlocks",
   "author": "MicroBlocks",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "MicroBlocks adapter plugin for Mozilla WebThings Gateway",
   "scripts": {
     "lint": "eslint ."
