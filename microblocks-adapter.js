@@ -419,6 +419,7 @@ class MicroBlocksAdapter extends Adapter {
         }
         this.addDevice(serialPort, JSON.parse(description));
         console.log('Thing description at', serialPort.path, 'complete');
+        serialPort.write(this.packBroadcastMessage('_clear thing description'));
       } catch (err) {
         console.error('Failed to add thing!');
         console.error(err);
