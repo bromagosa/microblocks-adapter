@@ -214,7 +214,7 @@ class MicroBlocksAdapter extends Adapter {
     const myself = this;
     if (port.vendorId) {
       const serialPort =
-        new SerialPort(port.comName, {baudRate: 115200});
+        new SerialPort(port.path, {baudRate: 115200});
 
       serialPort.buffer = [];
 
@@ -224,7 +224,7 @@ class MicroBlocksAdapter extends Adapter {
       });
 
       serialPort.on('open', function() {
-        console.log(`Probing ${port.comName}`);
+        console.log(`Probing ${port.path}`);
         // We ask the board to give us the value of the '_thing description'
         // variable
         serialPort.write([0xFA, 0x05, 0x00]); // startAll
@@ -244,7 +244,7 @@ class MicroBlocksAdapter extends Adapter {
         serialPort.drain();
 
         this.discoveryTimeout = setTimeout(function() {
-          console.log(`Port ${port.comName} timed out`);
+          console.log(`Port ${port.path} timed out`);
           serialPort.close();
           clearTimeout(this);
           serialPort.discoveryTimeout = null;
@@ -257,16 +257,16 @@ class MicroBlocksAdapter extends Adapter {
 
       serialPort.on('close', (err) => {
         if (err && err.disconnected) {
-          console.log('removing device at', port.comName,
+          console.log('removing device at', port.path,
                       'because it was unplugged');
           const device = this.deviceAtPort(serialPort);
           if (!device) {
-            console.warn('Unable to remove device at', port.comName);
+            console.warn('Unable to remove device at', port.path);
             return;
           }
           this.removeThing(device);
         } else {
-          console.log('device at', port.comName, 'successfully disconnected');
+          console.log('device at', port.path, 'successfully disconnected');
         }
       });
     }
