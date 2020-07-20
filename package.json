@@ -1,19 +1,12 @@
 {
   "name": "microblocks-adapter",
-  "display_name": "MicroBlocks",
   "author": "MicroBlocks",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "MicroBlocks adapter plugin for Mozilla WebThings Gateway",
   "scripts": {
     "lint": "eslint ."
   },
   "main": "index.js",
-  "keywords": [
-    "mozilla",
-    "iot",
-    "adapter",
-    "microblocks"
-  ],
   "homepage": "https://github.com/mozilla-iot/microblocks-adapter",
   "license": "MPL-2.0",
   "repository": {
@@ -32,19 +25,11 @@
     "microblocks-adapter.js",
     "node_modules"
   ],
-  "moziot": {
-    "api": {
-      "min": 2,
-      "max": 2
-    },
-    "plugin": true,
-    "exec": "{nodeLoader} {path}"
-  },
   "dependencies": {
     "serialport": "^8.0.8"
   },
   "devDependencies": {
     "babel-eslint": "^10.1.0",
-    "eslint": "^7.4.0"
+    "eslint": "^7.5.0"
   }
 }
