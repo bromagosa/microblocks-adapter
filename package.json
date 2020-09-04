@@ -7,14 +7,14 @@
     "lint": "eslint ."
   },
   "main": "index.js",
-  "homepage": "https://github.com/mozilla-iot/microblocks-adapter",
+  "homepage": "https://github.com/bromagosa/microblocks-adapter",
   "license": "MPL-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mozilla-iot/microblocks-adapter.git"
+    "url": "https://github.com/bromagosa/microblocks-adapter.git"
   },
   "bugs": {
-    "url": "https://github.com/mozilla-iot/microblocks-adapter/issues"
+    "url": "https://github.com/bromagosa/microblocks-adapter/issues"
   },
   "files": [
     "LICENSE",
